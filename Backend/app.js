@@ -4,6 +4,7 @@ import connectDB from './DB/db.js';
 import userRoutes from './routes/userRoutes.js';
 import cookie from 'cookie-parser';
 import cors from 'cors';
+import projectRoutes from './routes/projectRoutes.js';
 
 connectDB();
 
@@ -19,6 +20,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/user', userRoutes);
+app.use('/project', projectRoutes);
 
 app.get('/', (req, res) => {
   res.send('Devin AI Backend is running');

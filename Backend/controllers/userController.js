@@ -14,6 +14,8 @@ const createUserController = async(req,res)=>{
         const user = await createUser(req.body);
 
         const token = await user.generateAuthToken();
+
+        delete user._doc.password;
         res.status(201).json({ user, token });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -43,6 +45,8 @@ const loginController = async(req,res)=>{
         }
 
         const token = user.generateAuthToken();
+
+        delete user._doc.password;
 
         res.status(200).json({user, token});
     } catch (error) {

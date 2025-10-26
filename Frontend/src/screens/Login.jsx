@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from '../config/axios'
+import { useAppContext } from '../context/context'
+
 
 const Login = () => {
   const navigate = useNavigate()
+  const { setUser } = useAppContext()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -26,6 +29,7 @@ const Login = () => {
       // store token if returned
       if (res?.data?.token) {
         localStorage.setItem('token', res.data.token)
+        setUser(res.data.user)
       }
 
       await new Promise((resDelay) => setTimeout(resDelay, 300))

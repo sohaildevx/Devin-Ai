@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import axios from '../config/axios'
+import { useAppContext } from '../context/context'
 
 const Register = () => {
   const navigate = useNavigate()
@@ -9,6 +10,7 @@ const Register = () => {
 //   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const { setUser } = useAppContext()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -26,6 +28,7 @@ const Register = () => {
 
       if (res?.data?.token) {
         localStorage.setItem('token', res.data.token)
+        if (res.data.user) setUser(res.data.user)
       }
 
       await new Promise((resDelay) => setTimeout(resDelay, 300))
