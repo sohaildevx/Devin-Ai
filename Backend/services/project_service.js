@@ -62,13 +62,15 @@ const addUserToProject = async({projectId,users, userId})=>{
         throw new Error('Project not found');
     }
 
+    // Convert string user IDs to ObjectId instances
+    const userObjectIds = users.map(id => new mongoose.Types.ObjectId(id));
 
     const updatedProject = await Project.findOneAndUpdate({
         _id: projectId,
     },{
         $addToSet:{
             users:{
-                $each: users
+                $each: userObjectIds
             }
         }
     },{

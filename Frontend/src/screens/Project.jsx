@@ -1,0 +1,353 @@
+import React, { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+import axios from "../config/axios";
+
+const Project = () => {
+  const Location = useLocation();
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+  const [isUsersModalOpen, setIsUsersModalOpen] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [isAddingCollaborators, setIsAddingCollaborators] = useState(false);
+  const [addCollaboratorsError, setAddCollaboratorsError] = useState(null);
+
+  useEffect(() => {
+    axios
+      .get("/user/all-users")
+      .then((response) => {
+        console.log("Users response:", response.data);
+        // Handle both response formats: {users: [...]} or direct array
+        setUsers(response.data.users || response.data || []);
+      })
+      .catch((error) => {
+        console.error("Error fetching users:", error);
+        setUsers([]); // Ensure users is always an array
+      });
+  }, []);
+
+  const addCollaborators = async () => {
+    if (selectedUserIds.length === 0) {
+      setAddCollaboratorsError("Please select at least one user");
+      return;
+    }
+
+    // Check projectId from location state
+    const projectId = Location.state?.project?._id || Location.state?.projectId;
+    
+    if (!projectId) {
+      setAddCollaboratorsError("Project ID is missing. Please reload the page.");
+      console.error("Location.state:", Location.state);
+      return;
+    }
+
+    setIsAddingCollaborators(true);
+    setAddCollaboratorsError(null);
+
+    try {
+      console.log("Sending add-user request:", {
+        projectId: projectId,
+        users: selectedUserIds,
+      });
+
+      const response = await axios.put("/project/add-user", {
+        projectId: projectId,
+        users: selectedUserIds,
+      });
+      
+      console.log("Add collaborators response:", response.data);
+      
+      // Success - close modal and reset
+      setIsUsersModalOpen(false);
+      setSelectedUserIds([]);
+      setAddCollaboratorsError(null);
+      
+      // Optional: Show success message or refresh project data
+    } catch (error) {
+      console.error("Error adding collaborators:", error);
+      console.error("Error response data:", error.response?.data);
+      
+      const errorMessage = 
+        error.response?.data?.error || 
+        error.response?.data?.message ||
+        (error.response?.data?.errors ? 
+          error.response.data.errors.map(e => e.msg || e.message).join(", ") : 
+          error.message) ||
+        "Failed to add collaborators";
+      setAddCollaboratorsError(errorMessage);
+    } finally {
+      setIsAddingCollaborators(false);
+    }
+  };
+
+  console.log("Project location:", Location.state);
+
+  // Toggle user selection
+  const toggleUserSelection = (userId) => {
+    setSelectedUserIds((prev) => {
+      if (prev.includes(userId)) {
+        // Remove if already selected (unselect)
+        return prev.filter((id) => id !== userId);
+      } else {
+        // Add if not selected
+        return [...prev, userId];
+      }
+    });
+  };
+
+  return (
+    <main className="h-screen w-screen flex">
+      <section className="left flex flex-col h-full min-w-96 bg-slate-300">
+        <header className="flex justify-between p-2 px-4 w-full bg-slate-100">
+          <button
+            onClick={() => setIsUsersModalOpen(true)}
+            className="flex gap-2 items-center text-black text-sm hover:bg-slate-200 px-3 py-2 rounded-md transition cursor-pointer"
+          >
+            <i className="ri-add-line mr-1"></i>
+            <p>Add Collaborators</p>
+          </button>
+
+          <button
+            className="p-2 cursor-pointer hover:bg-slate-200 rounded-md transition"
+            onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+          >
+            <i className="ri-group-fill text-black"></i>
+          </button>
+        </header>
+
+        <div className="conversation-area grow flex flex-col">
+          <div className="message-box grow flex flex-col gap-3 p-2">
+            <div className="incoming text-black p-2 bg-white flex flex-col w-fit rounded-md max-w-56">
+              <small className="opacity-65 text-xs">example@gmail.com</small>
+              <p className="text-sm">Hello!</p>
+            </div>
+
+            <div className="Outgoing ml-auto text-black p-2 bg-white flex flex-col w-fit rounded-md max-w-56">
+              <small className="opacity-65 text-xs">example@gmail.com</small>
+              <p className="text-sm">Hey!</p>
+            </div>
+          </div>
+
+          <div className="inputField w-full flex ">
+            <input
+              type="text"
+              name=""
+              placeholder="Enter Message"
+              className="p-3 px-5 border-none outline-none bg-white text-black grow"
+            />
+            <button className="cursor-pointer bg-black px-3">
+              <i className="ri-send-plane-fill text-white"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Side Panel */}
+      <div
+        className={`sidePanel w-64 h-full bg-slate-200 fixed right-0 top-0 transform transition-transform duration-300 ease-in-out shadow-lg ${
+          isSidePanelOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <header className="flex items-center justify-between p-4 bg-slate-100 border-b">
+          <h2 className="text-lg font-semibold text-black">Team Members</h2>
+          <button
+            onClick={() => setIsSidePanelOpen(false)}
+            className="text-black"
+          >
+            <i className="ri-close-line text-xl"></i>
+          </button>
+        </header>
+        <div className="p-4">
+          {/* Team members list will go here */}
+          <p className="text-sm text-gray-600">No team members yet</p>
+        </div>
+
+        <div className="users flex flex-col gap-2">
+          <div className="user flex gap-2 items-center cursor-pointer hover:bg-slate-300 p-2">
+            <div className="aspect-square rounded-full w-fit h-fit flex items-center justify-center p-5 bg-slate-700">
+              <i className="ri-user-fill text-black absolute"></i>
+            </div>
+
+            <h1 className="font-semibold text-black text-lg">Username</h1>
+          </div>
+        </div>
+      </div>
+
+      {/* Users Modal */}
+      {isUsersModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-40"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg overflow-hidden">
+            <header className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-semibold text-gray-800">
+                Select Users
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600 hidden sm:block">
+                  Selected:{" "}
+                  <strong className="text-gray-800">
+                    {selectedUserIds.length} user
+                    {selectedUserIds.length !== 1 ? "s" : ""}
+                  </strong>
+                </span>
+                <button
+                  onClick={() => setIsUsersModalOpen(false)}
+                  className="p-2 rounded hover:bg-gray-100"
+                  aria-label="Close users modal"
+                >
+                  <svg
+                    className="w-5 h-5 text-gray-700"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </header>
+
+            <main className="p-4">
+              <div className="mb-3">
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-300 text-black"
+                  onChange={(e) => {
+                    const q = e.target.value.toLowerCase().trim();
+                    // simple local filter -- optional: could lift to state for performance
+                    // Filter visually by manipulating a CSS class via data attribute
+                    document
+                      .querySelectorAll("[data-user-item]")
+                      .forEach((el) => {
+                        const name = el
+                          .getAttribute("data-user-name")
+                          .toLowerCase();
+                        const email = el
+                          .getAttribute("data-user-email")
+                          .toLowerCase();
+                        el.style.display =
+                          name.includes(q) || email.includes(q) ? "" : "none";
+                      });
+                  }}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-80 overflow-auto pr-2">
+                {Array.isArray(users) && users.length > 0 ? (
+                  users.map((user) => {
+                    const isSelected = selectedUserIds.includes(user._id);
+                    return (
+                      <button
+                        key={user._id}
+                        data-user-item
+                        data-user-name={user.email}
+                        data-user-email={user.email}
+                        onClick={() => toggleUserSelection(user._id)}
+                        className={`flex items-center gap-3 w-full text-left p-3 rounded-lg border transition
+                        ${
+                          isSelected
+                            ? "bg-indigo-50 border-indigo-300 ring-2 ring-indigo-200"
+                            : "bg-white hover:bg-gray-50"
+                        }`}
+                      >
+                        <div className="flex-none w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-medium">
+                          {user.email.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-semibold text-gray-800">
+                              {user.email}
+                            </h4>
+                            {isSelected && (
+                              <svg
+                                className="w-5 h-5 text-indigo-600"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth="2"
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500">{user.email}</p>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full text-center text-gray-500 py-8">
+                    No users available
+                  </div>
+                )}
+              </div>
+            </main>
+
+            {addCollaboratorsError && (
+              <div className="mx-4 mb-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                <p className="text-sm text-red-600">{addCollaboratorsError}</p>
+              </div>
+            )}
+
+            <footer className="flex items-center justify-between p-4 border-t">
+              <div className="text-sm text-gray-600">
+                Selected IDs:{" "}
+                <span className="font-medium text-gray-800">
+                  {selectedUserIds.length > 0 ? selectedUserIds.length : "None"}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setSelectedUserIds([]);
+                    setAddCollaboratorsError(null);
+                  }}
+                  className="px-3 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-sm text-black disabled:opacity-50"
+                  disabled={isAddingCollaborators}
+                >
+                  Clear All
+                </button>
+                <button
+                  onClick={addCollaborators}
+                  disabled={isAddingCollaborators || selectedUserIds.length === 0}
+                  className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isAddingCollaborators ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      Add{" "}
+                      {selectedUserIds.length > 0
+                        ? `(${selectedUserIds.length})`
+                        : ""}
+                    </>
+                  )}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+};
+
+export default Project;
