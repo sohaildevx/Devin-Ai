@@ -17,6 +17,20 @@ const Project = () => {
   const [messageInput, setMessageInput] = useState("");
   const { user } = useAppContext();
   const messageRef = useRef();
+  const [fileTree, setFileTree] = useState({
+    "app.js": {
+       content: `const express = require('express');`
+    },
+    "package.json": {
+      content: `{
+  "name": "temp-server",
+    }`
+    }
+  });
+
+  const [currentFile, setCurrentFile] = useState(null);
+
+  const [openFiles, setOpenFiles] = useState([]);
 
   // messages state replaces DOM innerHTML manipulation
   const [messages, setMessages] = useState([]);
@@ -264,6 +278,69 @@ const Project = () => {
           </div>
         </div>
       </div>
+
+ <section className="right bg-red-50 flex-grow h-full flex">
+  {/* Left Explorer Section */}
+  <div className="explorer h-full max-w-64 bg-slate-200 min-w-52">
+    <div className="file-tree w-full">
+      {Object.keys(fileTree).map((fileName) => (
+        <button
+          type="button"
+          key={fileName}
+          className="tree-element p-2 px-4 flex items-center gap-2 bg-slate-100 w-full cursor-pointer hover:bg-slate-300"
+          onClick={() => {
+            setCurrentFile(fileName);
+            setOpenFiles((prev) => {
+              if (prev.includes(fileName)) return prev;
+              return [...prev, fileName];
+            });
+          }}
+        >
+          <p className="cursor-pointer font-semibold text-lg text-black">
+            {fileName}
+          </p>
+        </button>
+      ))}
+    </div>
+  </div>
+
+  {/* Right Editor Section */}
+  <div className="flex flex-col flex-grow">
+    {/* Open Files Tabs */}
+    <div className="open-files flex gap-2 p-2 bg-slate-100 border-b border-slate-300 text-black">
+      {openFiles.map((fileName) => (
+        <button
+          type="button"
+          key={fileName}
+          onClick={() => setCurrentFile(fileName)}
+          className={`open-file cursor-pointer px-4 py-1 font-semibold text-lg rounded ${
+            currentFile === fileName ? "bg-white" : "bg-slate-200"
+          }`}
+        >
+          {fileName}
+        </button>
+      ))}
+    </div>
+
+    {/* Editor Area */}
+    <div className="bottom flex-grow text-black p-2">
+      {fileTree[currentFile] && (
+        <textarea
+          className="w-full h-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+          value={fileTree[currentFile].content}
+          onChange={(e) => {
+            const newContent = e.target.value;
+            setFileTree((prev) => ({
+              ...prev,
+              [currentFile]: { ...prev[currentFile], content: newContent },
+            }));
+          }}
+        ></textarea>
+      )}
+    </div>
+  </div>
+</section>
+
 
       {/* Users Modal */}
       {isUsersModalOpen && (
