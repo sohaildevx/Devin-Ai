@@ -60,14 +60,39 @@ io.on('connection',async (socket)=>{
         const prompt = message.replace('@ai','').trim();
 
         const result = await main(prompt);
+       
 
-        io.to(socket.Project._id.toString()).emit('message',{
-          message: result,
+        // Remove markdown code block wrapper if present
+        let cleanedResult = result.trim();
+        if (cleanedResult.startsWith('```json')) {
+          cleanedResult = cleanedResult.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+        } else if (cleanedResult.startsWith('```')) {
+          cleanedResult = cleanedResult.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+
+        // Parse the AI response if it's JSON
+        let aiResponse;
+        try {
+          aiResponse = JSON.parse(cleanedResult);
+          if (aiResponse.fileTree) {
+            console.log("FileTree keys:", Object.keys(aiResponse.fileTree));
+          }
+        } catch (error) {
+          console.log("AI response is not JSON, sending as plain text", error.message);
+          aiResponse = { text: cleanedResult };
+        }
+
+        const messageToSend = {
+          message: aiResponse.text || cleanedResult,
+          fileTree: aiResponse.fileTree,
           sender:{
             _id: 'ai-bot',
             email: 'AI Bot'
           }
-        })
+        };
+        
+
+        io.to(socket.Project._id.toString()).emit('message', messageToSend);
         return;
       }
       

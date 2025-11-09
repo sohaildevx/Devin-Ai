@@ -18,14 +18,7 @@ const Project = () => {
   const { user } = useAppContext();
   const messageRef = useRef();
   const [fileTree, setFileTree] = useState({
-    "app.js": {
-       content: `const express = require('express');`
-    },
-    "package.json": {
-      content: `{
-  "name": "temp-server",
-    }`
-    }
+    // "app.js": { file: { contents: "// Welcome to Devin AI!\nconsole.log('Hello, Devin AI!');\n" } },
   });
 
   const [currentFile, setCurrentFile] = useState(null);
@@ -61,9 +54,39 @@ const Project = () => {
 
     const socket = initializeSocket(projectId);
 
-    // Define the message handler
+    
     const handleMessage = (data) => {
-      console.log("Received message:", data);
+      
+      let message;
+
+      try {
+        message = JSON.parse(data.message);
+      } catch (error) {
+        console.warn("Message is not JSON, treating as plain text:", data.message);
+        
+        message = { 
+          message: data.message,
+          sender: data.sender || 'ai-bot',
+          senderEmail: data.senderEmail || 'AI Assistant'
+        };
+      }
+
+      
+      const fileTreeData = message.fileTree || data.fileTree;
+      
+      if(fileTreeData){
+        console.log("FileTree received:", fileTreeData);
+        setFileTree(fileTreeData || {});
+        
+        if (!currentFile && Object.keys(fileTreeData).length > 0) {
+          const firstFileName = Object.keys(fileTreeData)[0];
+          console.log("Opening first file:", firstFileName);
+          setCurrentFile(firstFileName);
+          setOpenFiles([firstFileName]);
+        }
+      } else {
+        console.log("No fileTree found in message or data");
+      }
       pushIncomingMessage(data);
     };
 
@@ -103,7 +126,6 @@ const Project = () => {
 
    const send = ()=>{
       if (!messageInput.trim()) return;
-      
       if (!user || !user._id) {
         console.error("User not loaded");
         return;
@@ -112,7 +134,7 @@ const Project = () => {
       const messageData = {
         message: messageInput,
         sender: user._id,
-        senderEmail: user.email
+        senderEmail: user.email,
       };
        
   sendMessage('message', messageData);
@@ -327,12 +349,16 @@ const Project = () => {
       {fileTree[currentFile] && (
         <textarea
           className="w-full h-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
-          value={fileTree[currentFile].content}
+          value={fileTree[currentFile].file?.contents || fileTree[currentFile].content || ''}
           onChange={(e) => {
             const newContent = e.target.value;
             setFileTree((prev) => ({
               ...prev,
-              [currentFile]: { ...prev[currentFile], content: newContent },
+              [currentFile]: { 
+                file: {
+                  contents: newContent
+                }
+              },
             }));
           }}
         ></textarea>
