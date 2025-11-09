@@ -4,6 +4,7 @@ import axios from "../config/axios";
 import { initializeSocket, receiveMessage, sendMessage, disconnectSocket } from "../config/socket";
 import { useAppContext } from "../context/context";
 import Markdown from 'markdown-to-jsx'
+import { getWebContainerInstance } from "../config/webContainer";
 
 const Project = () => {
   const Location = useLocation();
@@ -27,6 +28,8 @@ const Project = () => {
 
   // messages state replaces DOM innerHTML manipulation
   const [messages, setMessages] = useState([]);
+
+  const [webContainer, setWebContainer] = useState(null);
 
   // auto-scroll when messages change
   useEffect(() => {
@@ -54,6 +57,14 @@ const Project = () => {
 
     const socket = initializeSocket(projectId);
 
+    if(!webContainer){
+      getWebContainerInstance().then((instance)=>{
+        setWebContainer(instance);
+        console.log("container Started");
+        
+      })
+    }
+
     
     const handleMessage = (data) => {
       
@@ -72,10 +83,13 @@ const Project = () => {
       }
 
       
+
+      
       const fileTreeData = message.fileTree || data.fileTree;
       
       if(fileTreeData){
         console.log("FileTree received:", fileTreeData);
+        webContainer?.mount(message.fileTree || {});
         setFileTree(fileTreeData || {});
         
         if (!currentFile && Object.keys(fileTreeData).length > 0) {
