@@ -20,7 +20,7 @@ export const initializeSocket = (projectId) => {
 
     console.log('Creating new socket connection for project:', projectId);
     
-    // Create new socket connection
+    // Create new socket connection with aggressive reconnection
     socketInstance = socket(import.meta.env.VITE_API_URL, {
         auth: {
             token: localStorage.getItem('token')
@@ -30,17 +30,44 @@ export const initializeSocket = (projectId) => {
         },
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionAttempts: 5
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: Infinity, // Keep trying to reconnect
+        timeout: 20000,
+        transports: ['websocket', 'polling'] // Try websocket first, fallback to polling
     });
 
     currentProjectId = projectId;
 
     socketInstance.on('connect', () => {
-        console.log('Socket connected with ID:', socketInstance.id);
+        console.log('✅ Socket connected with ID:', socketInstance.id);
     });
 
-    socketInstance.on('disconnect', () => {
-        console.log('Socket disconnected');
+    socketInstance.on('disconnect', (reason) => {
+        console.log('❌ Socket disconnected. Reason:', reason);
+        if (reason === 'io server disconnect') {
+            // Server disconnected the socket, manually reconnect
+            socketInstance.connect();
+        }
+    });
+
+    socketInstance.on('connect_error', (error) => {
+        console.log('⚠️ Connection error:', error.message);
+    });
+
+    socketInstance.on('reconnect', (attemptNumber) => {
+        console.log('🔄 Socket reconnected after', attemptNumber, 'attempts');
+    });
+
+    socketInstance.on('reconnect_attempt', (attemptNumber) => {
+        console.log('🔄 Reconnection attempt:', attemptNumber);
+    });
+
+    socketInstance.on('reconnect_error', (error) => {
+        console.log('⚠️ Reconnection error:', error.message);
+    });
+
+    socketInstance.on('reconnect_failed', () => {
+        console.log('❌ All reconnection attempts failed');
     });
 
     return socketInstance;
@@ -70,4 +97,12 @@ export const disconnectSocket = () => {
         socketInstance = null;
         currentProjectId = null;
     }
+}
+
+export const getSocketInstance = () => {
+    return socketInstance;
+}
+
+export const isSocketConnected = () => {
+    return socketInstance && socketInstance.connected;
 }

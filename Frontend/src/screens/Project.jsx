@@ -30,6 +30,10 @@ const Project = () => {
   const [messages, setMessages] = useState([]);
 
   const [webContainer, setWebContainer] = useState(null);
+  
+  // Socket connection status
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const socketRef = useRef(null);
 
   // auto-scroll when messages change
   useEffect(() => {
@@ -56,6 +60,20 @@ const Project = () => {
     }
 
     const socket = initializeSocket(projectId);
+    socketRef.current = socket;
+
+    // Track connection status
+    socket.on('connect', () => {
+      setIsSocketConnected(true);
+    });
+
+    socket.on('disconnect', () => {
+      setIsSocketConnected(false);
+    });
+
+    socket.on('reconnect', () => {
+      setIsSocketConnected(true);
+    });
 
     if(!webContainer){
       getWebContainerInstance().then((instance)=>{
@@ -228,7 +246,17 @@ const Project = () => {
   };
 
   return (
-    <main className="h-screen w-screen flex">
+    <main className="h-screen w-screen flex relative">
+      {/* Connection Status Indicator */}
+      <div className={`fixed top-2 right-2 z-50 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 transition-all ${
+        isSocketConnected 
+          ? 'bg-green-500 text-white' 
+          : 'bg-red-500 text-white animate-pulse'
+      }`}>
+        <span className={`w-2 h-2 rounded-full ${isSocketConnected ? 'bg-white' : 'bg-white'}`}></span>
+        {isSocketConnected ? 'Connected' : 'Reconnecting...'}
+      </div>
+
       <section className="left flex flex-col h-full min-w-96 bg-slate-300">
         <header className="flex justify-between p-2 px-4 w-full bg-slate-100">
           <button
