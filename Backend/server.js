@@ -58,10 +58,17 @@ io.on('connection',async (socket)=>{
         console.log("ai message");
         
         const prompt = message.replace('@ai','').trim();
+        const provider = data.aiProvider || 'gemini';
 
         try {
-          const result = await main(prompt);
-         
+          let result;
+
+          if(provider === 'huggingface'){
+            const {main: hfMain} = await import('./services/Hugging_Face_Ai.js');
+            result = await hfMain(prompt);
+          } else {
+            result = await main(prompt);
+          }
          
           let cleanedResult = result.trim();
           if (cleanedResult.startsWith('```json')) {

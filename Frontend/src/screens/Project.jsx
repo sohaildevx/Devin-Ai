@@ -34,6 +34,9 @@ const Project = () => {
   // Socket connection status
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const socketRef = useRef(null);
+  
+  // AI Provider selection
+  const [aiProvider, setAiProvider] = useState('gemini');
 
   // auto-scroll when messages change
   useEffect(() => {
@@ -167,6 +170,7 @@ const Project = () => {
         message: messageInput,
         sender: user._id,
         senderEmail: user.email,
+        aiProvider: aiProvider,
       };
        
   sendMessage('message', messageData);
@@ -258,7 +262,7 @@ const Project = () => {
       </div>
 
       <section className="left flex flex-col h-full min-w-96 bg-slate-300">
-        <header className="flex justify-between p-2 px-4 w-full bg-slate-100">
+        <header className="flex justify-between items-center p-2 px-4 w-full bg-slate-100">
           <button
             onClick={() => setIsUsersModalOpen(true)}
             className="flex gap-2 items-center text-black text-sm hover:bg-slate-200 px-3 py-2 rounded-md transition cursor-pointer"
@@ -267,12 +271,26 @@ const Project = () => {
             <p>Add Collaborators</p>
           </button>
 
-          <button
-            className="p-2 cursor-pointer hover:bg-slate-200 rounded-md transition"
-            onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
-          >
-            <i className="ri-group-fill text-black"></i>
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-gray-600 font-medium">AI Model:</label>
+              <select 
+                value={aiProvider}
+                onChange={(e) => setAiProvider(e.target.value)}
+                className="px-2 py-1 rounded border border-gray-300 bg-white text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+              >
+                <option value="gemini">Gemini</option>
+                <option value="huggingface">Hugging Face</option>
+              </select>
+            </div>
+
+            <button
+              className="p-2 cursor-pointer hover:bg-slate-200 rounded-md transition"
+              onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+            >
+              <i className="ri-group-fill text-black"></i>
+            </button>
+          </div>
         </header>
 
         <div className="conversation-area pt-14 pb-10 flex-grow flex flex-col h-screen relative">
