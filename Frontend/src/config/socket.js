@@ -20,12 +20,16 @@ export const initializeSocket = (projectId) => {
 
     console.log('Creating new socket connection for project:', projectId);
     
+    // Get token from memory if available
+    const token = typeof window !== 'undefined' && window.__appToken;
+    
     // Create new socket connection with aggressive reconnection
     // Cookies will be sent automatically with withCredentials
     socketInstance = socket(import.meta.env.VITE_API_URL, {
         query: {
             projectId
         },
+        auth: token ? { token } : {}, // Send token in auth if available
         withCredentials: true, // Send cookies automatically
         reconnection: true,
         reconnectionDelay: 1000,

@@ -26,6 +26,11 @@ const Register = () => {
 
       const res = await axios.post('/user/register', { email, password })
 
+      // Store token in memory as fallback for cookie issues
+      if (res?.data?.token) {
+        window.__appToken = res.data.token;
+      }
+
       // Cookie is set automatically by backend
       if (res.data.user) {
         setUser(res.data.user)

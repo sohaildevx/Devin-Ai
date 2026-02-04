@@ -18,12 +18,15 @@ const createUserController = async(req,res)=>{
         delete user._doc.password;
         
         // Set httpOnly cookie
-        res.cookie('token', token, {
+        const cookieOptions = {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
+            path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
-        });
+        };
+        
+        res.cookie('token', token, cookieOptions);
         
         res.status(201).json({ user, token });
     } catch (error) {
@@ -58,12 +61,15 @@ const loginController = async(req,res)=>{
         delete user._doc.password;
 
         // Set httpOnly cookie
-        res.cookie('token', token, {
+        const cookieOptions = {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'lax',
+            path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
-        });
+        };
+        
+        res.cookie('token', token, cookieOptions);
 
         res.status(200).json({user, token});
     } catch (error) {
@@ -74,7 +80,17 @@ const loginController = async(req,res)=>{
 
 const profileController = async(req,res)=>{
      try {
-        res.status(200).json({user:req.user});
+        // Fetch full user document from database
+        const user = await userModel.findOne({ email: req.user.email }).select('-password');
+        
+        if(!user){
+            return res.status(404).json({error:'User not found'});
+        }
+        
+        res.status(200).json({user: {
+            _id: user._id,
+            email: user.email
+        }});
      } catch (error) {
         res.status(500).json({ error: error.message });
      }

@@ -186,8 +186,6 @@ const Project = () => {
     if(!webContainer){
       getWebContainerInstance().then((instance)=>{
         setWebContainer(instance);
-        console.log("container Started");
-        
       })
     }
 
@@ -214,7 +212,6 @@ const Project = () => {
       const fileTreeData = message.fileTree || data.fileTree;
       
       if(fileTreeData){
-        console.log("FileTree received:", fileTreeData);
         // Mount files to WebContainer
         if (webContainer) {
           try {
@@ -227,12 +224,9 @@ const Project = () => {
         
         if (!currentFile && Object.keys(fileTreeData).length > 0) {
           const firstFileName = Object.keys(fileTreeData)[0];
-          console.log("Opening first file:", firstFileName);
           setCurrentFile(firstFileName);
           setOpenFiles([firstFileName]);
         }
-      } else {
-        console.log("No fileTree found in message or data");
       }
       pushIncomingMessage(data);
     };
@@ -242,8 +236,6 @@ const Project = () => {
 
     axios.get(`project/get-project/${projectId}`)
       .then((response) => {
-        console.log("Project response:", response.data);
-        console.log("Project users:", response.data.project?.users);
         setProject(response.data.project);
       })
       .catch((error) => {
@@ -253,13 +245,11 @@ const Project = () => {
     axios
       .get("/user/all-users")
       .then((response) => {
-        console.log("Users response:", response.data);
-        // Handle both response formats: {users: [...]} or direct array
         setUsers(response.data.users || response.data || []);
       })
       .catch((error) => {
         console.error("Error fetching users:", error);
-        setUsers([]); // Ensure users is always an array
+        setUsers([]);
       });
 
     // Cleanup function to remove event listener and disconnect socket when component unmounts
@@ -300,7 +290,6 @@ const Project = () => {
 
     // Prevent multiple simultaneous runs
     if (isRunning || runProcessRef.current) {
-      console.log("Already running, please wait...");
       return;
     }
 
@@ -315,17 +304,14 @@ const Project = () => {
         try {
           // Write file to WebContainer filesystem
           await webContainer.fs.writeFile(fileName, fileContent);
-          console.log(`Saved file: ${fileName}`);
         } catch (err) {
-          console.error(`Failed to save file ${fileName}:`, err);
           setTerminalOutput((prev) => `${prev}\n[Error saving ${fileName}: ${err.message}]\n`);
         }
       }
 
       // Verify file exists before running
       try {
-        const fileExists = await webContainer.fs.readFile(currentFile, 'utf-8');
-        console.log(`File ${currentFile} exists, content length: ${fileExists.length}`);
+        await webContainer.fs.readFile(currentFile, 'utf-8');
       } catch (err) {
         setTerminalOutput((prev) => `${prev}\n[Error: File ${currentFile} not found in WebContainer]\n`);
         setIsRunning(false);
@@ -382,18 +368,13 @@ const Project = () => {
       // Wait a bit to ensure files are written
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      console.log(`Spawning process: ${commandParts[0]} ${commandParts.slice(1).join(" ")}`);
-      
       // Spawn a new process to execute the command
       const proc = await webContainer.spawn(commandParts[0], commandParts.slice(1));
-      
-      console.log("Process spawned, reading output...");
       
       // Read output from stdout
       const stdoutReader = proc.output.getReader();
       const decoder = new TextDecoder();
       let hasOutput = false;
-      let outputBuffer = "";
       
       // Helper function to strip ANSI color codes
       const stripAnsi = (str) => {
@@ -405,13 +386,6 @@ const Project = () => {
           while (true) {
             const { value, done } = await stdoutReader.read();
             if (done) {
-              // Flush any remaining buffered data
-              if (outputBuffer) {
-                const cleanOutput = stripAnsi(outputBuffer);
-                setTerminalOutput((prev) => prev + cleanOutput);
-                hasOutput = true;
-              }
-              console.log("Stdout stream ended");
               break;
             }
             if (value != null) {
@@ -429,7 +403,6 @@ const Project = () => {
 
               // Strip ANSI color codes
               const cleanText = stripAnsi(text);
-              outputBuffer += cleanText;
               
               setTerminalOutput((prev) => {
                 const newOutput = prev + cleanText;
@@ -449,16 +422,12 @@ const Project = () => {
         }
       };
       
-      // Start reading output
-      readStdout();
+      // Start reading output and wait for it to complete
+      await readStdout();
       
       // Wait for process to exit
       try {
         const exitCode = await proc.exit;
-        console.log(`Process exited with code: ${exitCode}`);
-        
-        // Give a moment for any remaining output to flush
-        await new Promise(resolve => setTimeout(resolve, 100));
         
         if (!hasOutput) {
           if (exitCode !== 0) {
@@ -470,7 +439,6 @@ const Project = () => {
           setTerminalOutput((prev) => `${prev}\n[Process exited with code ${exitCode}]\n`);
         }
       } catch (err) {
-        console.error("Error waiting for process exit:", err);
         setTerminalOutput((prev) => `${prev}\n[Error: ${err.message}]\n`);
       } finally {
         setIsRunning(false);
@@ -478,8 +446,7 @@ const Project = () => {
       }
       
     } catch (err) {
-      console.error("Failed to run code:", err);
-        setTerminalOutput((prev) => `${prev}\n[Run error] ${err.message || String(err)}\n`);
+      setTerminalOutput((prev) => `${prev}\n[Run error] ${err.message || String(err)}\n`);
       setIsRunning(false);
       runProcessRef.current = null;
     }
@@ -512,12 +479,10 @@ const Project = () => {
       return;
     }
 
-    // Check projectId from location state
     const projectId = Location.state?.project?._id || Location.state?.projectId;
     
     if (!projectId) {
       setAddCollaboratorsError("Project ID is missing. Please reload the page.");
-      console.error("Location.state:", Location.state);
       return;
     }
 
@@ -525,28 +490,15 @@ const Project = () => {
     setAddCollaboratorsError(null);
 
     try {
-      console.log("Sending add-user request:", {
-        projectId: projectId,
-        users: selectedUserIds,
-      });
-
-      const response = await axios.put("/project/add-user", {
+      await axios.put("/project/add-user", {
         projectId: projectId,
         users: selectedUserIds,
       });
       
-      console.log("Add collaborators response:", response.data);
-      
-      // Success - close modal and reset
       setIsUsersModalOpen(false);
       setSelectedUserIds([]);
       setAddCollaboratorsError(null);
-      
-      // Optional: Show success message or refresh project data
     } catch (error) {
-      console.error("Error adding collaborators:", error);
-      console.error("Error response data:", error.response?.data);
-      
       const errorMessage = 
         error.response?.data?.error || 
         error.response?.data?.message ||
@@ -559,8 +511,6 @@ const Project = () => {
       setIsAddingCollaborators(false);
     }
   };
-
-  console.log("Project location:", Location.state);
 
   // Toggle user selection
   const toggleUserSelection = (userId) => {
@@ -587,7 +537,7 @@ const Project = () => {
   return (
     <main className="h-screen w-screen flex relative">
       {/* Connection Status Indicator */}
-      <div className={`fixed top-2 right-2 z-50 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 transition-all ${
+      <div className={`fixed top-2 left-2 z-50 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 transition-all ${
         isSocketConnected 
           ? 'bg-green-500 text-white' 
           : 'bg-red-500 text-white animate-pulse'
@@ -799,7 +749,11 @@ const Project = () => {
           <span>WebContainer Terminal</span>
           <div className="flex items-center gap-2">
             <span className="opacity-60 text-[10px]">
-              {isTerminalReady ? "ready" : "starting..."}
+              {!isTerminalReady 
+                ? "starting..." 
+                : isRunning 
+                ? "running..." 
+                : "ready"}
             </span>
             <i className={`ri-${isTerminalOpen ? "arrow-down-s" : "arrow-up-s"}-line text-xs`}></i>
           </div>
@@ -816,15 +770,21 @@ const Project = () => {
               <span className="px-2 text-xs text-gray-400">$</span>
               <input
                 type="text"
-                className="flex-1 bg-transparent text-green-200 text-xs px-1 py-2 outline-none"
-                placeholder={isTerminalReady ? "Type a command and press Enter" : "Waiting for shell..."}
+                className="flex-1 bg-transparent text-green-200 text-xs px-1 py-2 outline-none disabled:opacity-50"
+                placeholder={
+                  !isTerminalReady 
+                    ? "Waiting for shell..." 
+                    : isRunning 
+                    ? "Process running..." 
+                    : "Type a command and press Enter"
+                }
                 value={terminalCommand}
                 onChange={(e) => setTerminalCommand(e.target.value)}
-                disabled={!isTerminalReady}
+                disabled={!isTerminalReady || isRunning}
               />
               <button
                 type="submit"
-                disabled={!isTerminalReady}
+                disabled={!isTerminalReady || isRunning}
                 className="px-3 py-1 text-xs bg-gray-800 text-gray-100 disabled:opacity-40"
               >
                 Execute
