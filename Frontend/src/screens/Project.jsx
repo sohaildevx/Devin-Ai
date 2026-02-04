@@ -30,6 +30,15 @@ const Project = () => {
   const [messages, setMessages] = useState([]);
 
   const [webContainer, setWebContainer] = useState(null);
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalCommand, setTerminalCommand] = useState("");
+  const [isTerminalReady, setIsTerminalReady] = useState(false);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const terminalProcessRef = useRef(null);
+  const terminalWriterRef = useRef(null);
+  const terminalOutputRef = useRef(null);
+  const runProcessRef = useRef(null); // Track the current run process
   
   // Socket connection status
   const [isSocketConnected, setIsSocketConnected] = useState(false);
@@ -53,6 +62,79 @@ const Project = () => {
   const pushOutgoingMessage = (data) => {
     setMessages((prev) => [...prev, { ...data, incoming: false }]);
   };
+
+  // Start a WebContainer shell process to back the in-browser terminal
+  useEffect(() => {
+    if (!webContainer) return;
+
+    let cancelled = false;
+
+    const startShell = async () => {
+      try {
+        if (terminalProcessRef.current) return;
+
+        const shell = await webContainer.spawn("bash", {
+          terminal: {
+            cols: 80,
+            rows: 24,
+          },
+        });
+
+        if (cancelled) {
+          if (shell.kill) shell.kill();
+          return;
+        }
+
+        terminalProcessRef.current = shell;
+        const writer = shell.input.getWriter();
+        terminalWriterRef.current = writer;
+        setIsTerminalReady(true);
+
+        const reader = shell.output.getReader();
+        const decoder = new TextDecoder();
+
+        const read = async () => {
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (!value) continue;
+              const text = decoder.decode(value);
+              setTerminalOutput((prev) => {
+                const newOutput = prev + text;
+                // Auto-scroll to bottom
+                setTimeout(() => {
+                  if (terminalOutputRef.current) {
+                    terminalOutputRef.current.scrollTop = terminalOutputRef.current.scrollHeight;
+                  }
+                }, 0);
+                return newOutput;
+              });
+            }
+          } catch (err) {
+            console.error("Terminal stream error:", err);
+          }
+        };
+
+        read();
+      } catch (err) {
+        console.error("Failed to start WebContainer terminal:", err);
+        setTerminalOutput((prev) => `${prev}\n[terminal error] ${err.message || String(err)}`);
+      }
+    };
+
+    startShell();
+
+    return () => {
+      cancelled = true;
+      if (terminalProcessRef.current?.kill) {
+        terminalProcessRef.current.kill();
+      }
+      terminalProcessRef.current = null;
+      terminalWriterRef.current = null;
+      setIsTerminalReady(false);
+    };
+  }, [webContainer]);
 
   // Fetch user profile if not available in context
   useEffect(() => {
@@ -110,7 +192,7 @@ const Project = () => {
     }
 
     
-    const handleMessage = (data) => {
+    const handleMessage = async (data) => {
       
       let message;
 
@@ -133,7 +215,14 @@ const Project = () => {
       
       if(fileTreeData){
         console.log("FileTree received:", fileTreeData);
-        webContainer?.mount(message.fileTree || {});
+        // Mount files to WebContainer
+        if (webContainer) {
+          try {
+            await webContainer.mount(fileTreeData);
+          } catch (err) {
+            console.error("Failed to mount files to WebContainer:", err);
+          }
+        }
         setFileTree(fileTreeData || {});
         
         if (!currentFile && Object.keys(fileTreeData).length > 0) {
@@ -181,6 +270,220 @@ const Project = () => {
       }
     };
   }, [user]);
+
+  const handleTerminalSubmit = async (e) => {
+    e.preventDefault();
+    if (!terminalWriterRef.current || !terminalCommand.trim()) return;
+
+    try {
+      // Echo the command in the terminal view
+      setTerminalOutput((prev) => `${prev}\n$ ${terminalCommand}\n`);
+      
+      // Write command as Uint8Array for proper encoding
+      const encoder = new TextEncoder();
+      const commandBytes = encoder.encode(`${terminalCommand}\n`);
+      await terminalWriterRef.current.write(commandBytes);
+      
+      setTerminalCommand("");
+    } catch (err) {
+      console.error("Failed to write to terminal", err);
+      setTerminalOutput((prev) => `${prev}\n[write error] ${err.message || String(err)}`);
+    }
+  };
+
+  // Save files to WebContainer and run the code
+  const runCode = async () => {
+    if (!webContainer || !currentFile) {
+      alert("Please wait for WebContainer to be ready and select a file to run.");
+      return;
+    }
+
+    // Prevent multiple simultaneous runs
+    if (isRunning || runProcessRef.current) {
+      console.log("Already running, please wait...");
+      return;
+    }
+
+    setIsRunning(true);
+    setIsTerminalOpen(true); // Open terminal when running
+    runProcessRef.current = true;
+
+    try {
+      // Save all files from fileTree to WebContainer using filesystem API
+      for (const fileName of Object.keys(fileTree)) {
+        const fileContent = fileTree[fileName].file?.contents || fileTree[fileName].content || "";
+        try {
+          // Write file to WebContainer filesystem
+          await webContainer.fs.writeFile(fileName, fileContent);
+          console.log(`Saved file: ${fileName}`);
+        } catch (err) {
+          console.error(`Failed to save file ${fileName}:`, err);
+          setTerminalOutput((prev) => `${prev}\n[Error saving ${fileName}: ${err.message}]\n`);
+        }
+      }
+
+      // Verify file exists before running
+      try {
+        const fileExists = await webContainer.fs.readFile(currentFile, 'utf-8');
+        console.log(`File ${currentFile} exists, content length: ${fileExists.length}`);
+      } catch (err) {
+        setTerminalOutput((prev) => `${prev}\n[Error: File ${currentFile} not found in WebContainer]\n`);
+        setIsRunning(false);
+        return;
+      }
+
+      // Determine command based on file extension
+      const getRunCommand = (fileName) => {
+        const ext = fileName.split(".").pop().toLowerCase();
+
+        switch (ext) {
+          case "js":
+            return ["node", fileName];
+          case "ts":
+            return ["npx", "ts-node", fileName];
+          case "py":
+            return ["python3", fileName];
+          case "html":
+            return ["python3", "-m", "http.server", "8000"];
+          case "json":
+            return ["cat", fileName];
+          case "md":
+            return ["cat", fileName];
+          case "txt":
+            return ["cat", fileName];
+          default:
+            // Check if package.json exists, run npm start
+            if (fileTree["package.json"]) {
+              return ["npm", "start"];
+            }
+            return ["node", fileName]; // Default to node
+        }
+      };
+
+      const commandParts = getRunCommand(currentFile);
+      const commandString = commandParts.join(" ");
+      
+      // Show command in terminal (only once)
+      setTerminalOutput((prev) => {
+        // Prevent duplicate commands
+        if (prev.endsWith(`$ ${commandString}\n`)) {
+          return prev;
+        }
+        return `${prev}\n$ ${commandString}\n`;
+      });
+      
+      // Scroll terminal to bottom
+      setTimeout(() => {
+        if (terminalOutputRef.current) {
+          terminalOutputRef.current.scrollTop = terminalOutputRef.current.scrollHeight;
+        }
+      }, 0);
+      
+      // Wait a bit to ensure files are written
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      console.log(`Spawning process: ${commandParts[0]} ${commandParts.slice(1).join(" ")}`);
+      
+      // Spawn a new process to execute the command
+      const proc = await webContainer.spawn(commandParts[0], commandParts.slice(1));
+      
+      console.log("Process spawned, reading output...");
+      
+      // Read output from stdout
+      const stdoutReader = proc.output.getReader();
+      const decoder = new TextDecoder();
+      let hasOutput = false;
+      let outputBuffer = "";
+      
+      // Helper function to strip ANSI color codes
+      const stripAnsi = (str) => {
+        return str.replace(/\x1b\[[0-9;]*m/g, '');
+      };
+
+      const readStdout = async () => {
+        try {
+          while (true) {
+            const { value, done } = await stdoutReader.read();
+            if (done) {
+              // Flush any remaining buffered data
+              if (outputBuffer) {
+                const cleanOutput = stripAnsi(outputBuffer);
+                setTerminalOutput((prev) => prev + cleanOutput);
+                hasOutput = true;
+              }
+              console.log("Stdout stream ended");
+              break;
+            }
+            if (value != null) {
+              hasOutput = true;
+
+              // WebContainer should give Uint8Array, but be defensive
+              let text;
+              if (value instanceof Uint8Array) {
+                text = decoder.decode(value, { stream: true });
+              } else if (typeof value === "string") {
+                text = value;
+              } else {
+                text = String(value);
+              }
+
+              // Strip ANSI color codes
+              const cleanText = stripAnsi(text);
+              outputBuffer += cleanText;
+              
+              setTerminalOutput((prev) => {
+                const newOutput = prev + cleanText;
+                // Auto-scroll to bottom
+                setTimeout(() => {
+                  if (terminalOutputRef.current) {
+                    terminalOutputRef.current.scrollTop = terminalOutputRef.current.scrollHeight;
+                  }
+                }, 0);
+                return newOutput;
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to read stdout:", err);
+          setTerminalOutput((prev) => `${prev}\n[Error reading stdout: ${err.message}]\n`);
+        }
+      };
+      
+      // Start reading output
+      readStdout();
+      
+      // Wait for process to exit
+      try {
+        const exitCode = await proc.exit;
+        console.log(`Process exited with code: ${exitCode}`);
+        
+        // Give a moment for any remaining output to flush
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (!hasOutput) {
+          if (exitCode !== 0) {
+            setTerminalOutput((prev) => `${prev}\n[Process exited with code ${exitCode} - check for errors above]\n`);
+          } else {
+            setTerminalOutput((prev) => `${prev}\n[Process completed successfully - no output]\n`);
+          }
+        } else if (exitCode !== 0) {
+          setTerminalOutput((prev) => `${prev}\n[Process exited with code ${exitCode}]\n`);
+        }
+      } catch (err) {
+        console.error("Error waiting for process exit:", err);
+        setTerminalOutput((prev) => `${prev}\n[Error: ${err.message}]\n`);
+      } finally {
+        setIsRunning(false);
+        runProcessRef.current = null;
+      }
+      
+    } catch (err) {
+      console.error("Failed to run code:", err);
+        setTerminalOutput((prev) => `${prev}\n[Run error] ${err.message || String(err)}\n`);
+      setIsRunning(false);
+      runProcessRef.current = null;
+    }
+  };
 
    const send = ()=>{
       if (!messageInput.trim()) return;
@@ -418,43 +721,118 @@ const Project = () => {
     </div>
   </div>
 
-  {/* Right Editor Section */}
+  {/* Right Editor + Terminal Section */}
   <div className="flex flex-col flex-grow">
     {/* Open Files Tabs */}
-    <div className="open-files flex gap-2 p-2 bg-slate-100 border-b border-slate-300 text-black">
-      {openFiles.map((fileName) => (
+    <div className="open-files flex gap-2 p-2 bg-slate-100 border-b border-slate-300 text-black items-center">
+      <div className="flex gap-2 flex-1">
+        {openFiles.map((fileName) => (
+          <button
+            type="button"
+            key={fileName}
+            onClick={() => setCurrentFile(fileName)}
+            className={`open-file cursor-pointer px-4 py-1 font-semibold text-lg rounded ${
+              currentFile === fileName ? "bg-white" : "bg-slate-200"
+            }`}
+          >
+            {fileName}
+          </button>
+        ))}
+      </div>
+      {currentFile && (
         <button
-          type="button"
-          key={fileName}
-          onClick={() => setCurrentFile(fileName)}
-          className={`open-file cursor-pointer px-4 py-1 font-semibold text-lg rounded ${
-            currentFile === fileName ? "bg-white" : "bg-slate-200"
-          }`}
+          onClick={() => {
+            // Extra guard against double-clicks
+            if (!isRunning && !runProcessRef.current) {
+              runCode();
+            }
+          }}
+          disabled={!isTerminalReady || isRunning}
+          className="px-4 py-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded flex items-center gap-2 transition"
         >
-          {fileName}
+          <i className="ri-play-fill"></i>
+          {isRunning ? "Running..." : "Run"}
         </button>
-      ))}
+      )}
     </div>
 
-    {/* Editor Area */}
-    <div className="bottom flex-grow text-black p-2">
-      {fileTree[currentFile] && (
-        <textarea
-          className="w-full h-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
-          value={fileTree[currentFile].file?.contents || fileTree[currentFile].content || ''}
-          onChange={(e) => {
-            const newContent = e.target.value;
-            setFileTree((prev) => ({
-              ...prev,
-              [currentFile]: { 
-                file: {
-                  contents: newContent
+    {/* Editor + Terminal Area */}
+    <div className="bottom flex-grow text-black p-2 flex flex-col gap-3">
+      {/* Code editor */}
+      <div className="flex-1">
+        {fileTree[currentFile] && (
+          <textarea
+            className="w-full h-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+            value={fileTree[currentFile].file?.contents || fileTree[currentFile].content || ""}
+            onChange={async (e) => {
+              const newContent = e.target.value;
+              setFileTree((prev) => ({
+                ...prev,
+                [currentFile]: {
+                  file: {
+                    contents: newContent,
+                  },
+                },
+              }));
+              
+              // Auto-save to WebContainer when editing
+              if (webContainer && currentFile) {
+                try {
+                  await webContainer.fs.writeFile(currentFile, newContent);
+                } catch (err) {
+                  console.error("Failed to save file:", err);
                 }
-              },
-            }));
-          }}
-        ></textarea>
-      )}
+              }
+            }}
+          ></textarea>
+        )}
+      </div>
+
+      {/* WebContainer-backed terminal */}
+      <div className={`mt-1 flex flex-col border border-gray-300 rounded bg-black text-green-200 transition-all ${
+        isTerminalOpen ? "h-60" : "h-8"
+      }`}>
+        <div 
+          className="px-3 py-1 text-xs bg-gray-900 text-gray-200 border-b border-gray-700 flex justify-between items-center cursor-pointer"
+          onClick={() => setIsTerminalOpen(!isTerminalOpen)}
+        >
+          <span>WebContainer Terminal</span>
+          <div className="flex items-center gap-2">
+            <span className="opacity-60 text-[10px]">
+              {isTerminalReady ? "ready" : "starting..."}
+            </span>
+            <i className={`ri-${isTerminalOpen ? "arrow-down-s" : "arrow-up-s"}-line text-xs`}></i>
+          </div>
+        </div>
+        {isTerminalOpen && (
+          <>
+            <div 
+              ref={terminalOutputRef}
+              className="flex-1 overflow-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap min-h-0"
+            >
+              {terminalOutput || "Starting shell..."}
+            </div>
+            <form onSubmit={handleTerminalSubmit} className="flex items-center border-t border-gray-700">
+              <span className="px-2 text-xs text-gray-400">$</span>
+              <input
+                type="text"
+                className="flex-1 bg-transparent text-green-200 text-xs px-1 py-2 outline-none"
+                placeholder={isTerminalReady ? "Type a command and press Enter" : "Waiting for shell..."}
+                value={terminalCommand}
+                onChange={(e) => setTerminalCommand(e.target.value)}
+                disabled={!isTerminalReady}
+              />
+              <button
+                type="submit"
+                disabled={!isTerminalReady}
+                className="px-3 py-1 text-xs bg-gray-800 text-gray-100 disabled:opacity-40"
+              >
+                Execute
+              </button>
+            </form>
+          </>
+        )}
+      </div>
     </div>
   </div>
 </section>
