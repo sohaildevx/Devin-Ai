@@ -5,6 +5,7 @@ import { initializeSocket, receiveMessage, sendMessage, disconnectSocket } from 
 import { useAppContext } from "../context/context";
 import Markdown from 'markdown-to-jsx'
 import { getWebContainerInstance } from "../config/webContainer";
+import Editor from '@monaco-editor/react';
 
 const Project = () => {
   const Location = useLocation();
@@ -65,7 +66,10 @@ const Project = () => {
 
   // Start a WebContainer shell process to back the in-browser terminal
   useEffect(() => {
-    if (!webContainer) return;
+    if (!webContainer) {
+      setTerminalOutput("Waiting for WebContainer to initialize...\n");
+      return;
+    }
 
     let cancelled = false;
 
@@ -73,7 +77,9 @@ const Project = () => {
       try {
         if (terminalProcessRef.current) return;
 
-        const shell = await webContainer.spawn("bash", {
+        setTerminalOutput("Starting terminal shell...\n");
+        
+        const shell = await webContainer.spawn("jsh", {
           terminal: {
             cols: 80,
             rows: 24,
@@ -89,6 +95,7 @@ const Project = () => {
         const writer = shell.input.getWriter();
         terminalWriterRef.current = writer;
         setIsTerminalReady(true);
+        setTerminalOutput("Terminal ready. Type a command and press Enter.\n\n");
 
         const reader = shell.output.getReader();
         const decoder = new TextDecoder();
@@ -113,13 +120,15 @@ const Project = () => {
             }
           } catch (err) {
             console.error("Terminal stream error:", err);
+            setTerminalOutput((prev) => `${prev}\n[Stream error: ${err.message}]\n`);
           }
         };
 
         read();
       } catch (err) {
         console.error("Failed to start WebContainer terminal:", err);
-        setTerminalOutput((prev) => `${prev}\n[terminal error] ${err.message || String(err)}`);
+        setTerminalOutput((prev) => `${prev}\n[Terminal Error] ${err.message || String(err)}\n\nTry refreshing the page or check browser console for details.\n`);
+        setIsTerminalReady(false);
       }
     };
 
@@ -262,12 +271,18 @@ const Project = () => {
   }, [user]);
 
   const handleTerminalSubmit = async (e) => {
-    e.preventDefault();
-    if (!terminalWriterRef.current || !terminalCommand.trim()) return;
+    if (e) e.preventDefault();
+    
+    if (!terminalCommand.trim()) return;
+    
+    if (!terminalWriterRef.current) {
+      setTerminalOutput((prev) => `${prev}\n[Error: Terminal not ready. Please wait...]\n`);
+      return;
+    }
 
     try {
       // Echo the command in the terminal view
-      setTerminalOutput((prev) => `${prev}\n$ ${terminalCommand}\n`);
+      setTerminalOutput((prev) => `${prev}$ ${terminalCommand}\n`);
       
       // Write command as Uint8Array for proper encoding
       const encoder = new TextEncoder();
@@ -277,7 +292,14 @@ const Project = () => {
       setTerminalCommand("");
     } catch (err) {
       console.error("Failed to write to terminal", err);
-      setTerminalOutput((prev) => `${prev}\n[write error] ${err.message || String(err)}`);
+      setTerminalOutput((prev) => `${prev}\n[write error] ${err.message || String(err)}\n`);
+    }
+  };
+
+  const handleTerminalKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleTerminalSubmit();
     }
   };
 
@@ -479,6 +501,30 @@ const Project = () => {
         send();
       }
     }
+
+    // Detect language based on file extension
+    const getLanguageFromFileName = (fileName) => {
+      if (!fileName) return 'plaintext';
+      const ext = fileName.split('.').pop().toLowerCase();
+      const languageMap = {
+        'js': 'javascript',
+        'jsx': 'javascript',
+        'ts': 'typescript',
+        'tsx': 'typescript',
+        'py': 'python',
+        'html': 'html',
+        'css': 'css',
+        'json': 'json',
+        'md': 'markdown',
+        'txt': 'plaintext',
+        'yaml': 'yaml',
+        'yml': 'yaml',
+        'xml': 'xml',
+        'sh': 'shell',
+        'bash': 'shell',
+      };
+      return languageMap[ext] || 'plaintext';
+    }
     
   const addCollaborators = async () => {
     if (selectedUserIds.length === 0) {
@@ -542,7 +588,7 @@ const Project = () => {
   }
 
   return (
-    <main className="h-screen w-screen flex relative">
+    <main className="h-screen w-screen flex relative overflow-hidden">
       {/* Connection Status Indicator */}
       <div className={`fixed top-2 left-2 z-50 px-3 py-1 rounded-full text-xs font-medium flex items-center gap-2 transition-all ${
         isSocketConnected 
@@ -553,8 +599,8 @@ const Project = () => {
         {isSocketConnected ? 'Connected' : 'Reconnecting...'}
       </div>
 
-      <section className="left flex flex-col h-full min-w-96 bg-slate-300">
-        <header className="flex justify-between items-center p-2 px-4 w-full bg-slate-100">
+      <section className="left flex flex-col h-full w-96 min-w-96 max-w-96 bg-slate-300">
+        <header className="flex-shrink-0 flex justify-between items-center p-2 px-4 w-full bg-slate-100">
           <button
             onClick={() => setIsUsersModalOpen(true)}
             className="flex gap-2 items-center text-black text-sm hover:bg-slate-200 px-3 py-2 rounded-md transition cursor-pointer"
@@ -585,8 +631,8 @@ const Project = () => {
           </div>
         </header>
 
-        <div className="conversation-area pt-14 pb-10 flex-grow flex flex-col h-screen relative">
-          <div className="message-box p-1 flex-grow flex flex-col gap-1 overflow-auto max-h-full scrollbar-hide" ref={messageRef}>
+        <div className="conversation-area flex-1 flex flex-col relative overflow-hidden">
+          <div className="message-box p-2 flex-1 flex flex-col gap-1 overflow-y-auto" ref={messageRef}>
             {messages.map((m, idx) => {
               const isIncoming = m.incoming !== false;
               const isAi = m.sender === 'ai-bot' || m.sender?._id === 'ai-bot';
@@ -604,7 +650,7 @@ const Project = () => {
             })}
           </div>
 
-          <div className="inputField w-full flex absolute bottom-0">
+          <div className="inputField w-full flex flex-shrink-0 border-t border-slate-400">
             <input
               type="text"
               name=""
@@ -612,10 +658,10 @@ const Project = () => {
               onChange={(e)=> setMessageInput(e.target.value)}
               onKeyDown={handleChatKeyDown}
               placeholder="Enter Message"
-              className="p-3 px-5 border-none outline-none bg-white text-black grow"
+              className="p-3 px-5 border-none outline-none bg-white text-black flex-1"
             />
 
-            <button className="cursor-pointer bg-black px-3" onClick={send}>
+            <button className="cursor-pointer bg-black px-4 hover:bg-gray-800 transition" onClick={send}>
               <i className="ri-send-plane-fill text-white"></i>
             </button>
           </div>
@@ -654,9 +700,9 @@ const Project = () => {
         </div>
       </div>
 
- <section className="right bg-red-50 flex-grow h-full flex">
+ <section className="right bg-red-50 flex-1 h-full flex overflow-hidden">
   {/* Left Explorer Section */}
-  <div className="explorer h-full max-w-64 bg-slate-200 min-w-52">
+  <div className="explorer h-full w-52 min-w-52 max-w-64 bg-slate-200 overflow-y-auto flex-shrink-0">
     <div className="file-tree w-full">
       {Object.keys(fileTree).map((fileName) => (
         <button
@@ -680,9 +726,9 @@ const Project = () => {
   </div>
 
   {/* Right Editor + Terminal Section */}
-  <div className="flex flex-col flex-grow">
+  <div className="flex flex-col flex-1 overflow-hidden">
     {/* Open Files Tabs */}
-    <div className="open-files flex gap-2 p-2 bg-slate-100 border-b border-slate-300 text-black items-center">
+    <div className="open-files flex-shrink-0 flex gap-2 p-2 bg-slate-100 border-b border-slate-300 text-black items-center">
       <div className="flex gap-2 flex-1">
         {openFiles.map((fileName) => (
           <button
@@ -715,15 +761,18 @@ const Project = () => {
     </div>
 
     {/* Editor + Terminal Area */}
-    <div className="bottom flex-grow text-black p-2 flex flex-col gap-3">
-      {/* Code editor */}
-      <div className="flex-1">
-        {fileTree[currentFile] && (
-          <textarea
-            className="w-full h-full p-2 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+    <div className="bottom flex-1 text-black p-2 flex flex-col gap-2 overflow-hidden">
+      {/* Monaco Code editor */}
+      <div className="flex-1 min-h-0 border border-gray-300 rounded overflow-hidden">
+        {fileTree[currentFile] ? (
+          <Editor
+            height="100%"
+            language={getLanguageFromFileName(currentFile)}
             value={fileTree[currentFile].file?.contents || fileTree[currentFile].content || ""}
-            onChange={async (e) => {
-              const newContent = e.target.value;
+            theme="vs-dark"
+            onChange={async (newContent) => {
+              if (newContent === undefined) return;
+              
               setFileTree((prev) => ({
                 ...prev,
                 [currentFile]: {
@@ -742,13 +791,26 @@ const Project = () => {
                 }
               }
             }}
-          ></textarea>
+            options={{
+              minimap: { enabled: true },
+              fontSize: 14,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 2,
+              wordWrap: 'on',
+            }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gray-900 text-gray-400">
+            <p>Select a file to edit</p>
+          </div>
         )}
       </div>
 
       {/* WebContainer-backed terminal */}
-      <div className={`mt-1 flex flex-col border border-gray-300 rounded bg-black text-green-200 transition-all ${
-        isTerminalOpen ? "h-60" : "h-8"
+      <div className={`flex-shrink-0 flex flex-col border border-gray-300 rounded bg-black text-green-200 transition-all ${
+        isTerminalOpen ? "h-64" : "h-8"
       }`}>
         <div 
           className="px-3 py-1 text-xs bg-gray-900 text-gray-200 border-b border-gray-700 flex justify-between items-center cursor-pointer"
@@ -788,6 +850,7 @@ const Project = () => {
                 }
                 value={terminalCommand}
                 onChange={(e) => setTerminalCommand(e.target.value)}
+                onKeyDown={handleTerminalKeyDown}
                 disabled={!isTerminalReady || isRunning}
               />
               <button
