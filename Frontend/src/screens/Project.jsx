@@ -472,6 +472,13 @@ const Project = () => {
 
       setMessageInput("");
     }
+
+    const handleChatKeyDown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    }
     
   const addCollaborators = async () => {
     if (selectedUserIds.length === 0) {
@@ -603,6 +610,7 @@ const Project = () => {
               name=""
               value={messageInput}
               onChange={(e)=> setMessageInput(e.target.value)}
+              onKeyDown={handleChatKeyDown}
               placeholder="Enter Message"
               className="p-3 px-5 border-none outline-none bg-white text-black grow"
             />

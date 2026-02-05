@@ -12,9 +12,10 @@ const Register = () => {
   const [error, setError] = useState(null)
   const { setUser } = useAppContext()
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const submitForm = async () => {
     setError(null)
+    
+    if (loading) return
     
     setLoading(true)
     try {
@@ -46,6 +47,18 @@ const Register = () => {
     }
   }
 
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    await submitForm()
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      submitForm()
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900 text-gray-100 px-4">
       <div className="max-w-md w-full bg-gray-800/60 backdrop-blur-sm border border-gray-700 rounded-2xl p-8 shadow-lg">
@@ -59,6 +72,7 @@ const Register = () => {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="you@example.com"
               className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
@@ -70,6 +84,7 @@ const Register = () => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Create a password"
               className="w-full px-4 py-3 rounded-lg bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
