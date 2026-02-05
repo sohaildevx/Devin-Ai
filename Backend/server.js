@@ -90,6 +90,9 @@ io.on('connection',async (socket)=>{
           if(provider === 'huggingface'){
             const {main: hfMain} = await import('./services/Hugging_Face_Ai.js');
             result = await hfMain(prompt);
+          } else if(provider === 'openai'){
+            const {main: openaiMain} = await import('./services/OpenAI_Service.js');
+            result = await openaiMain(prompt);
           } else {
             result = await main(prompt);
           }

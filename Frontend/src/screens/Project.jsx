@@ -619,6 +619,7 @@ const Project = () => {
               >
                 <option value="gemini">Gemini</option>
                 <option value="huggingface">Hugging Face</option>
+                <option value="openai">OpenAI</option>
               </select>
             </div>
 
