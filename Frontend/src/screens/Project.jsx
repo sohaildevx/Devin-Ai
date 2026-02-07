@@ -525,6 +525,19 @@ const Project = () => {
       };
       return languageMap[ext] || 'plaintext';
     }
+
+    const handleLogout = async () => {
+      try {
+        await axios.get("/user/logout").catch(() => {});
+      } catch (error) {
+        console.error("Logout error:", error);
+      } finally {
+        setUser(null);
+        deleteCookie("token");
+        delete window.__appToken;
+        navigate("/login");
+      }
+    };
     
   const addCollaborators = async () => {
     if (selectedUserIds.length === 0) {
