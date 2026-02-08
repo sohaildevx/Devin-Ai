@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "../config/axios";
 import { initializeSocket, receiveMessage, sendMessage, disconnectSocket } from "../config/socket";
 import { useAppContext } from "../context/context";
+import { deleteCookie } from "../utils/cookies";
 import Markdown from 'markdown-to-jsx'
 import { getWebContainerInstance } from "../config/webContainer";
 import Editor from '@monaco-editor/react';
@@ -14,6 +15,8 @@ const Project = () => {
   const [selectedUserIds, setSelectedUserIds] = useState([]);
   const [project,setProject] = useState(Location.state?.project || null);
   const [users, setUsers] = useState([]);
+  const [filteredUsers, setFilteredUsers] = useState([]);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
   const [isAddingCollaborators, setIsAddingCollaborators] = useState(false);
   const [addCollaboratorsError, setAddCollaboratorsError] = useState(null);
   const [messageInput, setMessageInput] = useState("");
@@ -43,10 +46,13 @@ const Project = () => {
   
   // Socket connection status
   const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [socketError, setSocketError] = useState(null);
   const socketRef = useRef(null);
   
   // AI Provider selection
   const [aiProvider, setAiProvider] = useState('gemini');
+
+  const navigate = useNavigate();
 
   // auto-scroll when messages change
   useEffect(() => {
@@ -173,29 +179,53 @@ const Project = () => {
     
     if (!projectId) {
       console.error("No project ID found in location state");
+      setSocketError("Project ID not found");
       return;
     }
 
-    const socket = initializeSocket(projectId);
-    socketRef.current = socket;
+    let socket;
+    try {
+      socket = initializeSocket(projectId);
+      socketRef.current = socket;
 
-    // Track connection status
-    socket.on('connect', () => {
-      setIsSocketConnected(true);
-    });
+      // Track connection status
+      socket.on('connect', () => {
+        setIsSocketConnected(true);
+        setSocketError(null);
+      });
 
-    socket.on('disconnect', () => {
-      setIsSocketConnected(false);
-    });
+      socket.on('disconnect', () => {
+        setIsSocketConnected(false);
+      });
 
-    socket.on('reconnect', () => {
-      setIsSocketConnected(true);
-    });
+      socket.on('reconnect', () => {
+        setIsSocketConnected(true);
+        setSocketError(null);
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+        setSocketError('Failed to connect to server');
+        setIsSocketConnected(false);
+      });
+
+      socket.on('error', (error) => {
+        console.error('Socket error:', error);
+        setSocketError('Connection error occurred');
+      });
+    } catch (error) {
+      console.error('Failed to initialize socket:', error);
+      setSocketError('Failed to initialize connection');
+    }
 
     if(!webContainer){
-      getWebContainerInstance().then((instance)=>{
-        setWebContainer(instance);
-      })
+      getWebContainerInstance()
+        .then((instance)=>{
+          setWebContainer(instance);
+        })
+        .catch((error) => {
+          console.error('Failed to initialize WebContainer:', error);
+        });
     }
 
     
@@ -214,8 +244,6 @@ const Project = () => {
           senderEmail: data.senderEmail || 'AI Assistant'
         };
       }
-
-      
 
       
       const fileTreeData = message.fileTree || data.fileTree;
@@ -254,20 +282,29 @@ const Project = () => {
     axios
       .get("/user/all-users")
       .then((response) => {
-        setUsers(response.data.users || response.data || []);
+        const allUsers = response.data.users || response.data || [];
+        setUsers(allUsers);
+        setFilteredUsers(allUsers);
       })
       .catch((error) => {
         console.error("Error fetching users:", error);
         setUsers([]);
+        setFilteredUsers([]);
       });
 
     // Cleanup function to remove event listener and disconnect socket when component unmounts
     return () => {
       if (socket) {
         socket.off('message', handleMessage);
+        socket.off('connect');
+        socket.off('disconnect');
+        socket.off('reconnect');
+        socket.off('connect_error');
+        socket.off('error');
         disconnectSocket();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const handleTerminalSubmit = async (e) => {
@@ -556,14 +593,19 @@ const Project = () => {
     setAddCollaboratorsError(null);
 
     try {
-      await axios.put("/project/add-user", {
+      const response = await axios.put("/project/add-user", {
         projectId: projectId,
         users: selectedUserIds,
       });
       
+      // Refresh project data to show new collaborators
+      const updatedProject = await axios.get(`project/get-project/${projectId}`);
+      setProject(updatedProject.data.project);
+      
       setIsUsersModalOpen(false);
       setSelectedUserIds([]);
       setAddCollaboratorsError(null);
+      setUserSearchQuery("");
     } catch (error) {
       const errorMessage = 
         error.response?.data?.error || 
@@ -591,6 +633,20 @@ const Project = () => {
     });
   };
 
+  // Filter users based on search query
+  useEffect(() => {
+    if (!userSearchQuery.trim()) {
+      setFilteredUsers(users);
+    } else {
+      const query = userSearchQuery.toLowerCase().trim();
+      const filtered = users.filter((user) => {
+        const email = user.email?.toLowerCase() || '';
+        return email.includes(query);
+      });
+      setFilteredUsers(filtered);
+    }
+  }, [userSearchQuery, users]);
+
   // Show loading state if user is not loaded
   if (!user || !user._id) {
     return (
@@ -609,7 +665,7 @@ const Project = () => {
           : 'bg-red-500 text-white animate-pulse'
       }`}>
         <span className={`w-2 h-2 rounded-full ${isSocketConnected ? 'bg-white' : 'bg-white'}`}></span>
-        {isSocketConnected ? 'Connected' : 'Reconnecting...'}
+        {isSocketConnected ? 'Connected' : socketError || 'Reconnecting...'}
       </div>
 
       <section className="left flex flex-col h-full w-96 min-w-96 max-w-96 bg-slate-300">
@@ -930,37 +986,19 @@ const Project = () => {
                 <input
                   type="text"
                   placeholder="Search users..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
                   className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-300 text-black"
-                  onChange={(e) => {
-                    const q = e.target.value.toLowerCase().trim();
-                    // simple local filter -- optional: could lift to state for performance
-                    // Filter visually by manipulating a CSS class via data attribute
-                    document
-                      .querySelectorAll("[data-user-item]")
-                      .forEach((el) => {
-                        const name = el
-                          .getAttribute("data-user-name")
-                          .toLowerCase();
-                        const email = el
-                          .getAttribute("data-user-email")
-                          .toLowerCase();
-                        el.style.display =
-                          name.includes(q) || email.includes(q) ? "" : "none";
-                      });
-                  }}
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-80 overflow-auto pr-2">
-                {Array.isArray(users) && users.length > 0 ? (
-                  users.map((user) => {
+                {Array.isArray(filteredUsers) && filteredUsers.length > 0 ? (
+                  filteredUsers.map((user) => {
                     const isSelected = selectedUserIds.includes(user._id);
                     return (
                       <button
                         key={user._id}
-                        data-user-item
-                        data-user-name={user.email}
-                        data-user-email={user.email}
                         onClick={() => toggleUserSelection(user._id)}
                         className={`flex items-center gap-3 w-full text-left p-3 rounded-lg border transition
                         ${

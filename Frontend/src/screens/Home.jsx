@@ -9,6 +9,8 @@ const Home = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [projects, setProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -24,38 +26,47 @@ const Home = () => {
     }
   };
 
+  const fetchProjects = async () => {
+    setIsLoading(true);
+    try {
+      const res = await axios.get("/project/all");
+      setProjects(res.data.projects);
+    } catch (err) {
+      console.error(
+        "Error fetching projects:",
+        err,
+        err?.response?.data || err?.message
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const createProject = async (e) => {
     e.preventDefault();
-    console.log(projectName);
+    setIsCreating(true);
 
-    await axios
-      .post("/project/create-project", { name: projectName })
-      .then((res) => {
-        console.log("Project created:", res.data);
-        setIsModalOpen(false);
-      })
-      .catch((err) => {
-        console.error(
-          "Error creating project:",
-          err,
-          err?.response?.data || err?.message
-        );
-      });
+    try {
+      const res = await axios.post("/project/create-project", { name: projectName });
+      console.log("Project created:", res.data);
+      setIsModalOpen(false);
+      setProjectName("");
+      // Refresh the projects list
+      await fetchProjects();
+    } catch (err) {
+      console.error(
+        "Error creating project:",
+        err,
+        err?.response?.data || err?.message
+      );
+      alert("Failed to create project. Please try again.");
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   useEffect(() => {
-    axios
-      .get("/project/all")
-      .then((res) => {
-        setProjects(res.data.projects);
-      })
-      .catch((err) => {
-        console.error(
-          "Error fetching projects:",
-          err,
-          err?.response?.data || err?.message
-        );
-      });
+    fetchProjects();
   }, []);
 
   return (
@@ -77,7 +88,10 @@ const Home = () => {
             <i className="ri-link ml-2"></i>
           </button>
 
-          {projects.map((project) => (
+          {isLoading ? (
+            <div className="text-white">Loading projects...</div>
+          ) : (
+            projects.map((project) => (
             <div
               key={project._id}
               className="project p-4 border border-gray-700 rounded-md cursor-pointer flex flex-col gap-2 min-w-52 hover:bg-gray-700 bg-gray-800 text-white"
@@ -96,7 +110,8 @@ const Home = () => {
                 {project.users.length}
               </div>
             </div>
-          ))}
+            ))
+          )}
 
           <button
             onClick={handleLogout}
@@ -137,9 +152,10 @@ const Home = () => {
                     </button>
                     <button
                       type="submit"
-                      className="rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700"
+                      disabled={isCreating}
+                      className="rounded bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed"
                     >
-                      Create
+                      {isCreating ? "Creating..." : "Create"}
                     </button>
                   </div>
                 </form>

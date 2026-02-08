@@ -16,6 +16,59 @@ const io = new Server(server,{
   }
 });
 
+// Rate limiting for AI requests
+const aiRequestLimiter = new Map();
+const AI_RATE_LIMIT = {
+  maxRequests: 10, // Max requests per time window
+  timeWindow: 60000, // 1 minute in milliseconds
+  cooldown: 5000 // 5 seconds between consecutive requests
+};
+
+const checkAiRateLimit = (userId) => {
+  const now = Date.now();
+  const userLimits = aiRequestLimiter.get(userId) || { requests: [], lastRequest: 0 };
+  
+  // Check cooldown period
+  if (now - userLimits.lastRequest < AI_RATE_LIMIT.cooldown) {
+    return {
+      allowed: false,
+      message: `Please wait ${Math.ceil((AI_RATE_LIMIT.cooldown - (now - userLimits.lastRequest)) / 1000)} seconds before sending another AI request.`
+    };
+  }
+  
+  // Remove requests outside the time window
+  userLimits.requests = userLimits.requests.filter(
+    timestamp => now - timestamp < AI_RATE_LIMIT.timeWindow
+  );
+  
+  // Check if user exceeded rate limit
+  if (userLimits.requests.length >= AI_RATE_LIMIT.maxRequests) {
+    const oldestRequest = userLimits.requests[0];
+    const timeUntilReset = Math.ceil((AI_RATE_LIMIT.timeWindow - (now - oldestRequest)) / 1000);
+    return {
+      allowed: false,
+      message: `Rate limit exceeded. You can send ${AI_RATE_LIMIT.maxRequests} AI requests per minute. Please try again in ${timeUntilReset} seconds.`
+    };
+  }
+  
+  // Add current request
+  userLimits.requests.push(now);
+  userLimits.lastRequest = now;
+  aiRequestLimiter.set(userId, userLimits);
+  
+  return { allowed: true };
+};
+
+// Cleanup old entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, limits] of aiRequestLimiter.entries()) {
+    if (now - limits.lastRequest > AI_RATE_LIMIT.timeWindow * 2) {
+      aiRequestLimiter.delete(userId);
+    }
+  }
+}, 300000);
+
 // Helper function to parse cookies from cookie header string
 const parseCookies = (cookieHeader) => {
   const cookies = {};
@@ -80,6 +133,22 @@ io.on('connection',async (socket)=>{
 
       if(aiIsPresent){
         console.log("ai message");
+        
+        // Check rate limit
+        const userId = socket.user._id || socket.user.id;
+        const rateLimitCheck = checkAiRateLimit(userId);
+        
+        if (!rateLimitCheck.allowed) {
+          const rateLimitMessage = {
+            message: `⚠️ ${rateLimitCheck.message}`,
+            sender: {
+              _id: 'ai-bot',
+              email: 'AI Bot'
+            }
+          };
+          socket.emit('message', rateLimitMessage);
+          return;
+        }
         
         const prompt = message.replace('@ai','').trim();
         const provider = data.aiProvider || 'gemini';
