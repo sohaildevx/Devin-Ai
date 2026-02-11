@@ -112,6 +112,7 @@ io.use(async(socket, next) => {
 
     socket.Project = await Project.findById(projectId);
     if (!token) {
+      console.log('Socket auth failed: No token provided. Headers:', socket.handshake.headers.cookie ? 'Has cookies' : 'No cookies');
       return next(new Error('Authentication error: Token not provided'));
     }
 

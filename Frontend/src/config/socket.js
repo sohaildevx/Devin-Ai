@@ -3,6 +3,20 @@ import socket from 'socket.io-client';
 let socketInstance = null;
 let currentProjectId = null;
 
+
+const getBackendURL = () => {
+    const VITE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+    const VITE_API_URL = import.meta.env.VITE_API_URL;
+    
+    if (VITE_BACKEND_URL) {
+        return VITE_BACKEND_URL;
+    }
+    if (VITE_API_URL) {
+        return VITE_API_URL;
+    }
+    return 'http://localhost:8001';
+};
+
 export const initializeSocket = (projectId) => {
     // If socket already exists for the same project and is connected, return it
     if (socketInstance && socketInstance.connected && currentProjectId === projectId) {
@@ -23,9 +37,12 @@ export const initializeSocket = (projectId) => {
     // Get token from memory if available
     const token = typeof window !== 'undefined' && window.__appToken;
     
+    const backendURL = getBackendURL();
+    console.log('Socket connecting to:', backendURL);
+    
     // Create new socket connection with aggressive reconnection
     // Cookies will be sent automatically with withCredentials
-    socketInstance = socket(import.meta.env.VITE_API_URL, {
+    socketInstance = socket(backendURL, {
         query: {
             projectId
         },

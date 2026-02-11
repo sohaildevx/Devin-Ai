@@ -60,13 +60,14 @@ const loginController = async(req,res)=>{
 
         delete user._doc.password;
 
-        // Set httpOnly cookie
+        
         const cookieOptions = {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
             path: '/',
-            maxAge: 24 * 60 * 60 * 1000 // 24 hours
+            maxAge: 24 * 60 * 60 * 1000, // 24 hours
+            domain: process.env.NODE_ENV === 'production' ? undefined : 'localhost'
         };
         
         res.cookie('token', token, cookieOptions);
