@@ -53,6 +53,11 @@ const Project = () => {
   // AI Provider selection
   const [aiProvider, setAiProvider] = useState('gemini');
 
+  // File / Folder creation
+  const [isCreatingFile, setIsCreatingFile] = useState(false);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newItemName, setNewItemName] = useState("");
+
   const navigate = useNavigate();
 
   // auto-scroll when messages change
@@ -729,6 +734,46 @@ const Project = () => {
     }
   }, [userSearchQuery, users]);
 
+  const confirmNewItem = () => {
+    const name = newItemName.trim();
+    if (!name) return;
+
+    if (fileTree[name]) {
+      alert(`"${name}" already exists.`);
+      return;
+    }
+
+    let updatedTree;
+    if (isCreatingFile) {
+      updatedTree = { ...fileTree, [name]: { file: { contents: "" } } };
+      setFileTree(updatedTree);
+      setCurrentFile(name);
+      setOpenFiles((prev) => (prev.includes(name) ? prev : [...prev, name]));
+    } else {
+      updatedTree = { ...fileTree, [name]: { directory: {} } };
+      setFileTree(updatedTree);
+    }
+
+    saveFileTree(updatedTree);
+    setIsCreatingFile(false);
+    setIsCreatingFolder(false);
+    setNewItemName("");
+  };
+
+  const downloadCurrentFile = () => {
+    if (!currentFile || !fileTree[currentFile]) return;
+    const content = fileTree[currentFile].file?.contents || fileTree[currentFile].content || "";
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = currentFile;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   // Show loading state if user is not loaded
   if (!user || !user._id) {
     return (
@@ -919,26 +964,85 @@ const Project = () => {
 
  <section className="right bg-red-50 flex-1 h-full flex overflow-hidden">
   {/* Left Explorer Section */}
-  <div className="explorer h-full w-52 min-w-52 max-w-64 bg-slate-200 overflow-y-auto flex-shrink-0">
-    <div className="file-tree w-full">
-      {Object.keys(fileTree).map((fileName) => (
+  <div className="explorer h-full w-52 min-w-52 max-w-64 bg-slate-200 overflow-y-auto flex-shrink-0 flex flex-col">
+    {/* Explorer toolbar */}
+    <div className="flex items-center justify-between px-3 py-2 bg-slate-300 border-b border-slate-400 flex-shrink-0">
+      <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Explorer</span>
+      <div className="flex gap-1">
         <button
-          type="button"
-          key={fileName}
-          className="tree-element p-2 px-4 flex items-center gap-2 bg-slate-100 w-full cursor-pointer hover:bg-slate-300"
-          onClick={() => {
-            setCurrentFile(fileName);
-            setOpenFiles((prev) => {
-              if (prev.includes(fileName)) return prev;
-              return [...prev, fileName];
-            });
-          }}
+          title="New File"
+          onClick={() => { setIsCreatingFile(true); setIsCreatingFolder(false); setNewItemName(""); }}
+          className="p-1 hover:bg-slate-400 rounded text-slate-600 hover:text-black transition"
         >
-          <p className="cursor-pointer font-semibold text-lg text-black">
-            {fileName}
-          </p>
+          <i className="ri-file-add-line text-sm"></i>
         </button>
-      ))}
+        <button
+          title="New Folder"
+          onClick={() => { setIsCreatingFolder(true); setIsCreatingFile(false); setNewItemName(""); }}
+          className="p-1 hover:bg-slate-400 rounded text-slate-600 hover:text-black transition"
+        >
+          <i className="ri-folder-add-line text-sm"></i>
+        </button>
+      </div>
+    </div>
+
+    {/* Inline new-item input */}
+    {(isCreatingFile || isCreatingFolder) && (
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 border-b border-slate-300 flex-shrink-0">
+        <i className={`${isCreatingFile ? 'ri-file-line' : 'ri-folder-line'} text-slate-500 text-sm`}></i>
+        <input
+          autoFocus
+          type="text"
+          value={newItemName}
+          onChange={(e) => setNewItemName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') confirmNewItem();
+            if (e.key === 'Escape') { setIsCreatingFile(false); setIsCreatingFolder(false); }
+          }}
+          placeholder={isCreatingFile ? "filename.js" : "folder-name"}
+          className="flex-1 text-xs bg-white border border-slate-400 rounded px-1.5 py-0.5 outline-none text-black"
+        />
+        <button onClick={confirmNewItem} className="text-green-600 hover:text-green-800 p-0.5">
+          <i className="ri-check-line text-sm"></i>
+        </button>
+        <button onClick={() => { setIsCreatingFile(false); setIsCreatingFolder(false); }} className="text-red-500 hover:text-red-700 p-0.5">
+          <i className="ri-close-line text-sm"></i>
+        </button>
+      </div>
+    )}
+
+    <div className="file-tree w-full flex-1 overflow-y-auto">
+      {Object.keys(fileTree).map((fileName) => {
+        const isFolder = fileTree[fileName]?.directory !== undefined;
+        return (
+          <button
+            type="button"
+            key={fileName}
+            className={`tree-element p-2 px-3 flex items-center gap-2 w-full cursor-pointer hover:bg-slate-300 transition ${
+              currentFile === fileName ? 'bg-slate-300' : 'bg-slate-100'
+            }`}
+            onClick={() => {
+              if (isFolder) return;
+              setCurrentFile(fileName);
+              setOpenFiles((prev) => {
+                if (prev.includes(fileName)) return prev;
+                return [...prev, fileName];
+              });
+            }}
+          >
+            <i className={`${isFolder ? 'ri-folder-fill text-yellow-500' : 'ri-file-line text-slate-500'} text-sm flex-shrink-0`}></i>
+            <p className="font-semibold text-sm text-black truncate">
+              {fileName}
+            </p>
+          </button>
+        );
+      })}
+      {Object.keys(fileTree).length === 0 && (
+        <div className="flex flex-col items-center justify-center py-8 gap-2 text-slate-400">
+          <i className="ri-folder-open-line text-2xl"></i>
+          <p className="text-xs">No files yet</p>
+        </div>
+      )}
     </div>
   </div>
 
@@ -961,19 +1065,28 @@ const Project = () => {
         ))}
       </div>
       {currentFile && (
-        <button
-          onClick={() => {
-            // Extra guard against double-clicks
-            if (!isRunning && !runProcessRef.current) {
-              runCode();
-            }
-          }}
-          disabled={!isTerminalReady || isRunning}
-          className="px-4 py-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded flex items-center gap-2 transition"
-        >
-          <i className="ri-play-fill"></i>
-          {isRunning ? "Running..." : "Run"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={downloadCurrentFile}
+            title="Save file to computer"
+            className="px-3 py-1 bg-slate-600 hover:bg-slate-700 text-white font-semibold rounded flex items-center gap-1.5 transition text-sm"
+          >
+            <i className="ri-download-line"></i>
+            Save
+          </button>
+          <button
+            onClick={() => {
+              if (!isRunning && !runProcessRef.current) {
+                runCode();
+              }
+            }}
+            disabled={!isTerminalReady || isRunning}
+            className="px-4 py-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded flex items-center gap-2 transition"
+          >
+            <i className="ri-play-fill"></i>
+            {isRunning ? "Running..." : "Run"}
+          </button>
+        </div>
       )}
     </div>
 
