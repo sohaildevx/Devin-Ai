@@ -62,6 +62,8 @@ const Project = () => {
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newItemName, setNewItemName] = useState("");
+  const [creatingInsideFolder, setCreatingInsideFolder] = useState(null);
+  const [expandedFolders, setExpandedFolders] = useState(new Set());
 
   const navigate = useNavigate();
 
@@ -768,25 +770,44 @@ const Project = () => {
     const name = newItemName.trim();
     if (!name) return;
 
-    if (fileTree[name]) {
-      alert(`"${name}" already exists.`);
+    const fullPath = creatingInsideFolder ? `${creatingInsideFolder}/${name}` : name;
+
+    if (fileTree[fullPath]) {
+      alert(`"${fullPath}" already exists.`);
       return;
     }
 
     let updatedTree;
     if (isCreatingFile) {
-      updatedTree = { ...fileTree, [name]: { file: { contents: "" } } };
+      updatedTree = { ...fileTree, [fullPath]: { file: { contents: "" } } };
       setFileTree(updatedTree);
-      setCurrentFile(name);
-      setOpenFiles((prev) => (prev.includes(name) ? prev : [...prev, name]));
+      setCurrentFile(fullPath);
+      setOpenFiles((prev) => (prev.includes(fullPath) ? prev : [...prev, fullPath]));
+      // Auto-expand the parent folder
+      if (creatingInsideFolder) {
+        setExpandedFolders(prev => new Set([...prev, creatingInsideFolder]));
+      }
+      // Create file in WebContainer
+      if (webContainerRef.current) {
+        if (creatingInsideFolder) {
+          webContainerRef.current.fs.mkdir(creatingInsideFolder, { recursive: true }).catch(() => {});
+        }
+        webContainerRef.current.fs.writeFile(fullPath, "").catch(() => {});
+      }
     } else {
       updatedTree = { ...fileTree, [name]: { directory: {} } };
       setFileTree(updatedTree);
+      setExpandedFolders(prev => new Set([...prev, name]));
+      // Create directory in WebContainer
+      if (webContainerRef.current) {
+        webContainerRef.current.fs.mkdir(name, { recursive: true }).catch(() => {});
+      }
     }
 
     saveFileTree(updatedTree);
     setIsCreatingFile(false);
     setIsCreatingFolder(false);
+    setCreatingInsideFolder(null);
     setNewItemName("");
   };
 
@@ -1016,8 +1037,8 @@ const Project = () => {
       </div>
     </div>
 
-    {/* Inline new-item input */}
-    {(isCreatingFile || isCreatingFolder) && (
+    {/* Inline input for top-level new items (not inside a folder) */}
+    {(isCreatingFile || isCreatingFolder) && !creatingInsideFolder && (
       <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 border-b border-slate-300 flex-shrink-0">
         <i className={`${isCreatingFile ? 'ri-file-line' : 'ri-folder-line'} text-slate-500 text-sm`}></i>
         <input
@@ -1027,7 +1048,7 @@ const Project = () => {
           onChange={(e) => setNewItemName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') confirmNewItem();
-            if (e.key === 'Escape') { setIsCreatingFile(false); setIsCreatingFolder(false); }
+            if (e.key === 'Escape') { setIsCreatingFile(false); setIsCreatingFolder(false); setCreatingInsideFolder(null); }
           }}
           placeholder={isCreatingFile ? "filename.js" : "folder-name"}
           className="flex-1 text-xs bg-white border border-slate-400 rounded px-1.5 py-0.5 outline-none text-black"
@@ -1035,38 +1056,134 @@ const Project = () => {
         <button onClick={confirmNewItem} className="text-green-600 hover:text-green-800 p-0.5">
           <i className="ri-check-line text-sm"></i>
         </button>
-        <button onClick={() => { setIsCreatingFile(false); setIsCreatingFolder(false); }} className="text-red-500 hover:text-red-700 p-0.5">
+        <button onClick={() => { setIsCreatingFile(false); setIsCreatingFolder(false); setCreatingInsideFolder(null); }} className="text-red-500 hover:text-red-700 p-0.5">
           <i className="ri-close-line text-sm"></i>
         </button>
       </div>
     )}
 
     <div className="file-tree w-full flex-1 overflow-y-auto">
-      {Object.keys(fileTree).map((fileName) => {
-        const isFolder = fileTree[fileName]?.directory !== undefined;
-        return (
-          <button
-            type="button"
-            key={fileName}
-            className={`tree-element p-2 px-3 flex items-center gap-2 w-full cursor-pointer hover:bg-slate-300 transition ${
-              currentFile === fileName ? 'bg-slate-300' : 'bg-slate-100'
-            }`}
-            onClick={() => {
-              if (isFolder) return;
-              setCurrentFile(fileName);
-              setOpenFiles((prev) => {
-                if (prev.includes(fileName)) return prev;
-                return [...prev, fileName];
-              });
-            }}
-          >
-            <i className={`${isFolder ? 'ri-folder-fill text-yellow-500' : 'ri-file-line text-slate-500'} text-sm flex-shrink-0`}></i>
-            <p className="font-semibold text-sm text-black truncate">
-              {fileName}
-            </p>
-          </button>
-        );
-      })}
+      {(() => {
+        // Group entries: collect top-level items and nest children under their parent folder
+        const displayItems = {};
+        Object.keys(fileTree).forEach(key => {
+          const slashIdx = key.indexOf('/');
+          if (slashIdx === -1) {
+            if (!displayItems[key]) displayItems[key] = { entry: fileTree[key], children: [] };
+            else displayItems[key].entry = fileTree[key];
+          } else {
+            const parent = key.substring(0, slashIdx);
+            if (!displayItems[parent]) displayItems[parent] = { entry: { directory: {} }, children: [] };
+            displayItems[parent].children.push(key);
+          }
+        });
+
+        return Object.keys(displayItems).map(name => {
+          const { entry, children } = displayItems[name];
+          const isFolder = entry?.directory !== undefined;
+          const isExpanded = expandedFolders.has(name);
+
+          if (!isFolder) {
+            return (
+              <button
+                type="button"
+                key={name}
+                className={`tree-element p-2 px-3 flex items-center gap-2 w-full cursor-pointer hover:bg-slate-300 transition ${
+                  currentFile === name ? 'bg-slate-300' : 'bg-slate-100'
+                }`}
+                onClick={() => {
+                  setCurrentFile(name);
+                  setOpenFiles(prev => prev.includes(name) ? prev : [...prev, name]);
+                }}
+              >
+                <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
+                <p className="font-semibold text-sm text-black truncate">{name}</p>
+              </button>
+            );
+          }
+
+          // Folder row
+          return (
+            <div key={name}>
+              {/* Folder header */}
+              <div className="flex items-center group hover:bg-slate-300 bg-slate-100 transition">
+                <button
+                  type="button"
+                  className="flex-1 flex items-center gap-1.5 p-2 px-3 min-w-0"
+                  onClick={() => setExpandedFolders(prev => {
+                    const next = new Set(prev);
+                    next.has(name) ? next.delete(name) : next.add(name);
+                    return next;
+                  })}
+                >
+                  <i className={`ri-arrow-${isExpanded ? 'down' : 'right'}-s-line text-slate-400 text-xs flex-shrink-0`}></i>
+                  <i className={`${isExpanded ? 'ri-folder-open-fill' : 'ri-folder-fill'} text-yellow-500 text-sm flex-shrink-0`}></i>
+                  <p className="font-semibold text-sm text-black truncate">{name}</p>
+                </button>
+                {/* Add file inside this folder */}
+                <button
+                  type="button"
+                  title={`New file in ${name}/`}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 mr-1 hover:bg-slate-400 rounded text-slate-600 transition flex-shrink-0"
+                  onClick={() => {
+                    setIsCreatingFile(true);
+                    setIsCreatingFolder(false);
+                    setCreatingInsideFolder(name);
+                    setNewItemName("");
+                    setExpandedFolders(prev => new Set([...prev, name]));
+                  }}
+                >
+                  <i className="ri-file-add-line text-xs"></i>
+                </button>
+              </div>
+
+              {/* Inline input for creating a file inside this folder */}
+              {isCreatingFile && creatingInsideFolder === name && (
+                <div className="flex items-center gap-1 pl-7 pr-2 py-1.5 bg-slate-50 border-b border-slate-300">
+                  <i className="ri-file-line text-slate-500 text-xs flex-shrink-0"></i>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmNewItem();
+                      if (e.key === 'Escape') { setIsCreatingFile(false); setCreatingInsideFolder(null); }
+                    }}
+                    placeholder="filename.js"
+                    className="flex-1 text-xs bg-white border border-slate-400 rounded px-1.5 py-0.5 outline-none text-black"
+                  />
+                  <button onClick={confirmNewItem} className="text-green-600 hover:text-green-800 p-0.5">
+                    <i className="ri-check-line text-sm"></i>
+                  </button>
+                  <button onClick={() => { setIsCreatingFile(false); setCreatingInsideFolder(null); }} className="text-red-500 hover:text-red-700 p-0.5">
+                    <i className="ri-close-line text-sm"></i>
+                  </button>
+                </div>
+              )}
+
+              {/* Files inside folder (shown when expanded) */}
+              {isExpanded && children.map(filePath => (
+                <button
+                  type="button"
+                  key={filePath}
+                  className={`w-full flex items-center gap-2 pl-8 pr-3 py-2 hover:bg-slate-300 transition ${
+                    currentFile === filePath ? 'bg-slate-300' : 'bg-slate-100'
+                  }`}
+                  onClick={() => {
+                    setCurrentFile(filePath);
+                    setOpenFiles(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
+                  }}
+                >
+                  <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
+                  <p className="font-semibold text-sm text-black truncate">{filePath.split('/').pop()}</p>
+                </button>
+              ))}
+            </div>
+          );
+        });
+      })()}
+
       {Object.keys(fileTree).length === 0 && (
         <div className="flex flex-col items-center justify-center py-8 gap-2 text-slate-400">
           <i className="ri-folder-open-line text-2xl"></i>
