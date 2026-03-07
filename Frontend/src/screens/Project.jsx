@@ -65,6 +65,10 @@ const Project = () => {
   const [creatingInsideFolder, setCreatingInsideFolder] = useState(null);
   const [expandedFolders, setExpandedFolders] = useState(new Set());
 
+  // Rename state
+  const [renamingFile, setRenamingFile] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+
   const navigate = useNavigate();
 
   // Keep refs in sync so stale closures always read the latest value
@@ -811,6 +815,81 @@ const Project = () => {
     setNewItemName("");
   };
 
+  const deleteFile = (filePath) => {
+    if (!window.confirm(`Delete "${filePath}"?`)) return;
+    const updatedTree = { ...fileTree };
+    Object.keys(updatedTree).forEach((key) => {
+      if (key === filePath || key.startsWith(filePath + '/')) {
+        delete updatedTree[key];
+      }
+    });
+    setFileTree(updatedTree);
+    setOpenFiles((prev) => prev.filter((f) => f !== filePath && !f.startsWith(filePath + '/')));
+    setCurrentFile((prev) => {
+      if (prev === filePath || prev?.startsWith(filePath + '/')) {
+        const remaining = Object.keys(updatedTree);
+        return remaining.length > 0 ? remaining[0] : null;
+      }
+      return prev;
+    });
+    if (webContainerRef.current) {
+      webContainerRef.current.fs.rm(filePath, { recursive: true }).catch(() => {});
+    }
+    saveFileTree(updatedTree);
+  };
+
+  const confirmRename = () => {
+    const newName = renameValue.trim();
+    if (!newName) { setRenamingFile(null); setRenameValue(""); return; }
+
+    const parts = renamingFile.split('/');
+    const newPath = parts.length > 1
+      ? `${parts.slice(0, -1).join('/')}/${newName}`
+      : newName;
+
+    if (newPath === renamingFile) { setRenamingFile(null); setRenameValue(""); return; }
+
+    if (fileTree[newPath]) {
+      alert(`"${newPath}" already exists.`);
+      return;
+    }
+
+    const updatedTree = { ...fileTree };
+    updatedTree[newPath] = updatedTree[renamingFile];
+    delete updatedTree[renamingFile];
+
+    // Rename all children (for folders)
+    Object.keys(fileTree).forEach((key) => {
+      if (key.startsWith(renamingFile + '/')) {
+        const childNewKey = newPath + key.slice(renamingFile.length);
+        updatedTree[childNewKey] = fileTree[key];
+        delete updatedTree[key];
+      }
+    });
+
+    setFileTree(updatedTree);
+    setOpenFiles((prev) =>
+      prev.map((f) => {
+        if (f === renamingFile) return newPath;
+        if (f.startsWith(renamingFile + '/')) return newPath + f.slice(renamingFile.length);
+        return f;
+      })
+    );
+    setCurrentFile((prev) => {
+      if (prev === renamingFile) return newPath;
+      if (prev?.startsWith(renamingFile + '/')) return newPath + prev.slice(renamingFile.length);
+      return prev;
+    });
+    setExpandedFolders((prev) => {
+      const next = new Set();
+      prev.forEach((f) => next.add(f === renamingFile ? newPath : f));
+      return next;
+    });
+    setRenamingFile(null);
+    setRenameValue("");
+    saveFileTree(updatedTree);
+  };
+
   const downloadCurrentFile = () => {
     if (!currentFile || !fileTree[currentFile]) return;
     const content = fileTree[currentFile].file?.contents || fileTree[currentFile].content || "";
@@ -1084,21 +1163,67 @@ const Project = () => {
           const isExpanded = expandedFolders.has(name);
 
           if (!isFolder) {
+            if (renamingFile === name) {
+              return (
+                <div key={name} className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 border-b border-slate-300">
+                  <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmRename();
+                      if (e.key === 'Escape') { setRenamingFile(null); setRenameValue(""); }
+                    }}
+                    className="flex-1 text-xs bg-white border border-slate-400 rounded px-1.5 py-0.5 outline-none text-black"
+                  />
+                  <button onClick={confirmRename} className="text-green-600 hover:text-green-800 p-0.5">
+                    <i className="ri-check-line text-sm"></i>
+                  </button>
+                  <button onClick={() => { setRenamingFile(null); setRenameValue(""); }} className="text-red-500 hover:text-red-700 p-0.5">
+                    <i className="ri-close-line text-sm"></i>
+                  </button>
+                </div>
+              );
+            }
             return (
-              <button
-                type="button"
+              <div
                 key={name}
-                className={`tree-element p-2 px-3 flex items-center gap-2 w-full cursor-pointer hover:bg-slate-300 transition ${
+                className={`group tree-element flex items-center w-full hover:bg-slate-300 transition ${
                   currentFile === name ? 'bg-slate-300' : 'bg-slate-100'
                 }`}
-                onClick={() => {
-                  setCurrentFile(name);
-                  setOpenFiles(prev => prev.includes(name) ? prev : [...prev, name]);
-                }}
               >
-                <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
-                <p className="font-semibold text-sm text-black truncate">{name}</p>
-              </button>
+                <button
+                  type="button"
+                  className="flex-1 flex items-center gap-2 p-2 px-3 min-w-0"
+                  onClick={() => {
+                    setCurrentFile(name);
+                    setOpenFiles(prev => prev.includes(name) ? prev : [...prev, name]);
+                  }}
+                >
+                  <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
+                  <p className="font-semibold text-sm text-black truncate">{name}</p>
+                </button>
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 pr-1 flex-shrink-0">
+                  <button
+                    type="button"
+                    title="Rename"
+                    className="p-1 hover:bg-slate-400 rounded text-slate-600 transition"
+                    onClick={(e) => { e.stopPropagation(); setRenamingFile(name); setRenameValue(name); }}
+                  >
+                    <i className="ri-pencil-line text-xs"></i>
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete"
+                    className="p-1 hover:bg-red-200 rounded text-red-500 transition"
+                    onClick={(e) => { e.stopPropagation(); deleteFile(name); }}
+                  >
+                    <i className="ri-delete-bin-line text-xs"></i>
+                  </button>
+                </div>
+              </div>
             );
           }
 
@@ -1106,36 +1231,77 @@ const Project = () => {
           return (
             <div key={name}>
               {/* Folder header */}
-              <div className="flex items-center group hover:bg-slate-300 bg-slate-100 transition">
-                <button
-                  type="button"
-                  className="flex-1 flex items-center gap-1.5 p-2 px-3 min-w-0"
-                  onClick={() => setExpandedFolders(prev => {
-                    const next = new Set(prev);
-                    next.has(name) ? next.delete(name) : next.add(name);
-                    return next;
-                  })}
-                >
-                  <i className={`ri-arrow-${isExpanded ? 'down' : 'right'}-s-line text-slate-400 text-xs flex-shrink-0`}></i>
-                  <i className={`${isExpanded ? 'ri-folder-open-fill' : 'ri-folder-fill'} text-yellow-500 text-sm flex-shrink-0`}></i>
-                  <p className="font-semibold text-sm text-black truncate">{name}</p>
-                </button>
-                {/* Add file inside this folder */}
-                <button
-                  type="button"
-                  title={`New file in ${name}/`}
-                  className="opacity-0 group-hover:opacity-100 p-1.5 mr-1 hover:bg-slate-400 rounded text-slate-600 transition flex-shrink-0"
-                  onClick={() => {
-                    setIsCreatingFile(true);
-                    setIsCreatingFolder(false);
-                    setCreatingInsideFolder(name);
-                    setNewItemName("");
-                    setExpandedFolders(prev => new Set([...prev, name]));
-                  }}
-                >
-                  <i className="ri-file-add-line text-xs"></i>
-                </button>
-              </div>
+              {renamingFile === name ? (
+                <div className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 border-b border-slate-300">
+                  <i className="ri-folder-fill text-yellow-500 text-sm flex-shrink-0"></i>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmRename();
+                      if (e.key === 'Escape') { setRenamingFile(null); setRenameValue(""); }
+                    }}
+                    className="flex-1 text-xs bg-white border border-slate-400 rounded px-1.5 py-0.5 outline-none text-black"
+                  />
+                  <button onClick={confirmRename} className="text-green-600 hover:text-green-800 p-0.5">
+                    <i className="ri-check-line text-sm"></i>
+                  </button>
+                  <button onClick={() => { setRenamingFile(null); setRenameValue(""); }} className="text-red-500 hover:text-red-700 p-0.5">
+                    <i className="ri-close-line text-sm"></i>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center group hover:bg-slate-300 bg-slate-100 transition">
+                  <button
+                    type="button"
+                    className="flex-1 flex items-center gap-1.5 p-2 px-3 min-w-0"
+                    onClick={() => setExpandedFolders(prev => {
+                      const next = new Set(prev);
+                      next.has(name) ? next.delete(name) : next.add(name);
+                      return next;
+                    })}
+                  >
+                    <i className={`ri-arrow-${isExpanded ? 'down' : 'right'}-s-line text-slate-400 text-xs flex-shrink-0`}></i>
+                    <i className={`${isExpanded ? 'ri-folder-open-fill' : 'ri-folder-fill'} text-yellow-500 text-sm flex-shrink-0`}></i>
+                    <p className="font-semibold text-sm text-black truncate">{name}</p>
+                  </button>
+                  <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 pr-1 flex-shrink-0">
+                    {/* Add file inside this folder */}
+                    <button
+                      type="button"
+                      title={`New file in ${name}/`}
+                      className="p-1.5 hover:bg-slate-400 rounded text-slate-600 transition"
+                      onClick={() => {
+                        setIsCreatingFile(true);
+                        setIsCreatingFolder(false);
+                        setCreatingInsideFolder(name);
+                        setNewItemName("");
+                        setExpandedFolders(prev => new Set([...prev, name]));
+                      }}
+                    >
+                      <i className="ri-file-add-line text-xs"></i>
+                    </button>
+                    <button
+                      type="button"
+                      title="Rename folder"
+                      className="p-1.5 hover:bg-slate-400 rounded text-slate-600 transition"
+                      onClick={() => { setRenamingFile(name); setRenameValue(name); }}
+                    >
+                      <i className="ri-pencil-line text-xs"></i>
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete folder"
+                      className="p-1.5 hover:bg-red-200 rounded text-red-500 transition"
+                      onClick={() => deleteFile(name)}
+                    >
+                      <i className="ri-delete-bin-line text-xs"></i>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Inline input for creating a file inside this folder */}
               {isCreatingFile && creatingInsideFolder === name && (
@@ -1163,22 +1329,70 @@ const Project = () => {
               )}
 
               {/* Files inside folder (shown when expanded) */}
-              {isExpanded && children.map(filePath => (
-                <button
-                  type="button"
-                  key={filePath}
-                  className={`w-full flex items-center gap-2 pl-8 pr-3 py-2 hover:bg-slate-300 transition ${
-                    currentFile === filePath ? 'bg-slate-300' : 'bg-slate-100'
-                  }`}
-                  onClick={() => {
-                    setCurrentFile(filePath);
-                    setOpenFiles(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
-                  }}
-                >
-                  <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
-                  <p className="font-semibold text-sm text-black truncate">{filePath.split('/').pop()}</p>
-                </button>
-              ))}
+              {isExpanded && children.map(filePath => {
+                if (renamingFile === filePath) {
+                  return (
+                    <div key={filePath} className="flex items-center gap-1 pl-7 pr-2 py-1.5 bg-slate-50 border-b border-slate-300">
+                      <i className="ri-file-line text-slate-500 text-xs flex-shrink-0"></i>
+                      <input
+                        autoFocus
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') confirmRename();
+                          if (e.key === 'Escape') { setRenamingFile(null); setRenameValue(""); }
+                        }}
+                        className="flex-1 text-xs bg-white border border-slate-400 rounded px-1.5 py-0.5 outline-none text-black"
+                      />
+                      <button onClick={confirmRename} className="text-green-600 hover:text-green-800 p-0.5">
+                        <i className="ri-check-line text-sm"></i>
+                      </button>
+                      <button onClick={() => { setRenamingFile(null); setRenameValue(""); }} className="text-red-500 hover:text-red-700 p-0.5">
+                        <i className="ri-close-line text-sm"></i>
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    key={filePath}
+                    className={`group flex items-center w-full hover:bg-slate-300 transition ${
+                      currentFile === filePath ? 'bg-slate-300' : 'bg-slate-100'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      className="flex-1 flex items-center gap-2 pl-8 pr-2 py-2 min-w-0"
+                      onClick={() => {
+                        setCurrentFile(filePath);
+                        setOpenFiles(prev => prev.includes(filePath) ? prev : [...prev, filePath]);
+                      }}
+                    >
+                      <i className="ri-file-line text-slate-500 text-sm flex-shrink-0"></i>
+                      <p className="font-semibold text-sm text-black truncate">{filePath.split('/').pop()}</p>
+                    </button>
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 pr-1 flex-shrink-0">
+                      <button
+                        type="button"
+                        title="Rename"
+                        className="p-1 hover:bg-slate-400 rounded text-slate-600 transition"
+                        onClick={(e) => { e.stopPropagation(); setRenamingFile(filePath); setRenameValue(filePath.split('/').pop()); }}
+                      >
+                        <i className="ri-pencil-line text-xs"></i>
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete"
+                        className="p-1 hover:bg-red-200 rounded text-red-500 transition"
+                        onClick={(e) => { e.stopPropagation(); deleteFile(filePath); }}
+                      >
+                        <i className="ri-delete-bin-line text-xs"></i>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           );
         });
